@@ -24,7 +24,7 @@ fun BluewhaleTheme(
 ) {
     // App-level override from ThemePreferenceManager
     val themePref by ThemePreferenceManager.themeFlow.collectAsState(initial = ThemePreference.System)
-    val textColorPref by TextColorPreferenceManager.textColorFlow.collectAsState(initial = TextColorPreference.Green)
+    val textColorPref by TextColorPreferenceManager.textColorFlow.collectAsState(initial = TextColorPreference.LightBlue)
     
     val shouldUseDark = when (darkTheme) {
         true -> true

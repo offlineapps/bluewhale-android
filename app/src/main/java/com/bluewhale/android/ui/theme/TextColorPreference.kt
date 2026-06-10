@@ -46,13 +46,13 @@ object TextColorPreferenceManager {
     private const val PREFS_NAME = "bitchat_settings"
     private const val KEY_TEXT_COLOR = "text_color_preference"
 
-    private val _textColorFlow = MutableStateFlow(TextColorPreference.Green)
+    private val _textColorFlow = MutableStateFlow(TextColorPreference.LightBlue)
     val textColorFlow: StateFlow<TextColorPreference> = _textColorFlow
 
     fun init(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val saved = prefs.getString(KEY_TEXT_COLOR, TextColorPreference.Green.name)
-        _textColorFlow.value = runCatching { TextColorPreference.valueOf(saved!!) }.getOrDefault(TextColorPreference.Green)
+        val saved = prefs.getString(KEY_TEXT_COLOR, TextColorPreference.LightBlue.name)
+        _textColorFlow.value = runCatching { TextColorPreference.valueOf(saved!!) }.getOrDefault(TextColorPreference.LightBlue)
     }
 
     fun set(context: Context, preference: TextColorPreference) {
