@@ -2,6 +2,7 @@ package com.bluewhale.android.ui.media
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,7 +26,7 @@ fun RealtimeScrollingWaveform(
     modifier: Modifier = Modifier,
     amplitudeNorm: Float,
     bars: Int = 240,
-    barColor: Color = Color(0xFF00FF7F),
+    barColor: Color = MaterialTheme.colorScheme.primary,
     baseColor: Color = Color(0xFF444444)
 ) {
     val latestAmp by rememberUpdatedState(amplitudeNorm)

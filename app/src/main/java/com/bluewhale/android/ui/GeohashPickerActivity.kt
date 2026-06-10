@@ -94,7 +94,7 @@ class GeohashPickerActivity : OrientationAwareActivity() {
                 // iOS system-like colors used across app
                 val colorScheme = MaterialTheme.colorScheme
                 val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
-                val standardGreen = if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D)
+                val standardGreen = colorScheme.primary
 
                 Scaffold { padding ->
                     Box(Modifier.fillMaxSize()) {

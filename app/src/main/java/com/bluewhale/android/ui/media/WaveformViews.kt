@@ -2,6 +2,7 @@ package com.bluewhale.android.ui.media
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -41,7 +42,7 @@ fun ScrollingWaveformRecorder(
             kotlinx.coroutines.delay(80)
         }
     }
-    WaveformCanvas(modifier = modifier, samples = samples, fillProgress = 1f, baseColor = Color(0xFF444444), fillColor = Color(0xFF00FF7F))
+    WaveformCanvas(modifier = modifier, samples = samples, fillProgress = 1f, baseColor = Color(0xFF444444), fillColor = MaterialTheme.colorScheme.primary)
 }
 
 @Composable
@@ -77,7 +78,7 @@ fun WaveformPreview(
         baseColor = Color(0x2200FF7F),
         fillColor = when {
             sendProgress != null -> Color(0xFF1E88E5) // blue while sending
-            else -> Color(0xFF00C851) // green during playback
+            else -> MaterialTheme.colorScheme.primary // accent during playback
         },
         onSeek = onSeek
     )

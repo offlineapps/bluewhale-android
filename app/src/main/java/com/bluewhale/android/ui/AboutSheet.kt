@@ -102,7 +102,7 @@ private fun ThemeChip(
         onClick = onClick,
         shape = RoundedCornerShape(10.dp),
         color = if (selected) {
-            if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D)
+            colorScheme.primary
         } else {
             colorScheme.surfaceVariant.copy(alpha = 0.5f)
         }
@@ -237,7 +237,7 @@ private fun SettingsToggleRow(
             enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D),
+                checkedTrackColor = colorScheme.primary,
                 uncheckedThumbColor = Color.White,
                 uncheckedTrackColor = colorScheme.surfaceVariant
             )
@@ -715,8 +715,8 @@ fun AboutSheet(
                                             valueRange = 0f..32f,
                                             steps = 31,
                                             colors = SliderDefaults.colors(
-                                                thumbColor = if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D),
-                                                activeTrackColor = if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D)
+                                                thumbColor = colorScheme.primary,
+                                                activeTrackColor = colorScheme.primary
                                             )
                                         )
                                         

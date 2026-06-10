@@ -81,7 +81,7 @@ fun FileSendingAnimation(
         Icon(
             imageVector = Icons.Filled.Description,
             contentDescription = stringResource(R.string.cd_file),
-            tint = Color(0xFF00C851), // Green like app theme
+            tint = MaterialTheme.colorScheme.primary, // accent like app theme
             modifier = Modifier.size(32.dp)
         )
 
@@ -150,7 +150,7 @@ private fun FileProgressBars(
         text = progressString,
         style = MaterialTheme.typography.bodySmall.copy(
             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-            color = Color(0xFF00FF7F) // Matrix green
+            color = MaterialTheme.colorScheme.primary // accent
         ),
         modifier = modifier
     )
