@@ -3,6 +3,28 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+
+## [1.0.0] - 2026-06-10
+
+First release of **bluewhale**, a fork of bitchat.
+
+### Changed
+- Rebrand from bitchat to bluewhale: package `com.bluewhale.android`,
+  applicationId `com.bluewhale.droid`, app name, themes, deep-link scheme, and
+  localized strings (#5). Default accent color is Light Blue.
+
+### Added
+- SMS webhook gateway: turn the device into a gateway that forwards incoming SMS
+  to a configured HTTPS webhook, with optional Nostr directory publishing and
+  discovery (#2).
+- Selectable text/accent color (Green, Yellow, Pink, Light Blue, Orange) with
+  distinct light/dark variants across chat, sheets, and input; defaults to
+  Light Blue (#4).
+
+### Fixed
+- FragmentManager: bound reassembly memory with per-set and global byte caps plus
+  LRU eviction, preventing memory exhaustion from many in-flight fragment sets (#6).
+
 ## [1.4.0] - 2025-10-15
 ### Fixed
 - fix: Resolve debug settings bottom sheet crash on some devices (Issue #472)
