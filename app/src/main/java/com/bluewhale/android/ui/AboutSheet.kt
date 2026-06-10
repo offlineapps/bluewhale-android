@@ -35,6 +35,11 @@ import com.bluewhale.android.core.ui.component.sheet.BluewhaleBottomSheet
 import com.bluewhale.android.net.TorMode
 import com.bluewhale.android.net.TorPreferenceManager
 import com.bluewhale.android.net.ArtiTorManager
+import com.bluewhale.android.smsgateway.SmsGatewaySettingsScreen
+import com.bluewhale.android.smsgateway.GatewayDirectoryScreen
+import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.foundation.clickable
 
 /**
  * Feature row for displaying app capabilities
@@ -113,6 +118,56 @@ private fun ThemeChip(
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 color = if (selected) Color.White else colorScheme.onSurface.copy(alpha = 0.8f)
+            )
+        }
+    }
+}
+
+/**
+ * Color selection chip with preview circle
+ */
+@Composable
+private fun ColorChip(
+    label: String,
+    color: Color,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    
+    Surface(
+        modifier = modifier,
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = if (selected) {
+            color.copy(alpha = 0.15f)
+        } else {
+            colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        },
+        border = if (selected) {
+            androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.5f))
+        } else null
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Surface(
+                modifier = Modifier.size(12.dp),
+                shape = CircleShape,
+                color = color
+            ) {}
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) color else colorScheme.onSurface.copy(alpha = 0.8f),
+                maxLines = 1
             )
         }
     }
@@ -226,6 +281,19 @@ fun AboutSheet(
 
     val colorScheme = MaterialTheme.colorScheme
     val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
+    
+    var showSmsSettings by remember { mutableStateOf(false) }
+    var showSmsDirectory by remember { mutableStateOf(false) }
+    
+    if (showSmsSettings) {
+        SmsGatewaySettingsScreen(onDismiss = { showSmsSettings = false })
+        return
+    }
+    
+    if (showSmsDirectory) {
+        GatewayDirectoryScreen(onDismiss = { showSmsDirectory = false })
+        return
+    }
     
     if (isPresented) {
         BluewhaleBottomSheet(
@@ -363,6 +431,62 @@ fun AboutSheet(
                         }
                     }
 
+                    // Text Color Section
+                    item(key = "text_color") {
+                        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                            Text(
+                                text = "TEXT COLOR",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colorScheme.onBackground.copy(alpha = 0.5f),
+                                letterSpacing = 0.5.sp,
+                                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                            )
+                            val textColorPref by com.bluewhale.android.ui.theme.TextColorPreferenceManager.textColorFlow.collectAsState()
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = colorScheme.surface,
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        com.bluewhale.android.ui.theme.TextColorPreference.values().take(3).forEach { pref ->
+                                            ColorChip(
+                                                label = pref.displayName,
+                                                color = pref.getColor(isDark),
+                                                selected = textColorPref == pref,
+                                                onClick = { com.bluewhale.android.ui.theme.TextColorPreferenceManager.set(context, pref) },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        com.bluewhale.android.ui.theme.TextColorPreference.values().drop(3).forEach { pref ->
+                                            ColorChip(
+                                                label = pref.displayName,
+                                                color = pref.getColor(isDark),
+                                                selected = textColorPref == pref,
+                                                onClick = { com.bluewhale.android.ui.theme.TextColorPreferenceManager.set(context, pref) },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        // Empty space to align the last two chips if there were more, 
+                                        // but we have 5 colors, so 3 + 2.
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Settings Section - Unified Card with Toggles
                     item(key = "settings") {
                         LaunchedEffect(Unit) { PoWPreferenceManager.init(context) }
@@ -452,6 +576,88 @@ fun AboutSheet(
                                             }
                                         } else null
                                     )
+                                    
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+                                    
+                                    // SMS Settings Button
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { showSmsSettings = true }
+                                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Sms,
+                                            contentDescription = null,
+                                            tint = colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.width(14.dp))
+                                        
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Text(
+                                                text = "SMS Gateway",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                color = colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Configure this device to forward SMS to Webhook",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colorScheme.onSurface.copy(alpha = 0.6f),
+                                                lineHeight = 16.sp
+                                            )
+                                        }
+                                    }
+                                    
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+                                    
+                                    // SMS Directory Button
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { showSmsDirectory = true }
+                                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Contacts,
+                                            contentDescription = null,
+                                            tint = colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.width(14.dp))
+                                        
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Text(
+                                                text = "Gateway Directory",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                color = colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Discover SMS Gateways",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colorScheme.onSurface.copy(alpha = 0.6f),
+                                                lineHeight = 16.sp
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             

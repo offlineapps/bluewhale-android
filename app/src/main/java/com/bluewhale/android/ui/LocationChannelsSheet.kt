@@ -112,7 +112,7 @@ fun LocationChannelsSheet(
     // iOS system colors (matches iOS exactly)
     val colorScheme = MaterialTheme.colorScheme
     val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
-    val standardGreen = if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D) // iOS green
+    val standardPrimary = colorScheme.primary // Dynamic primary
     val standardBlue = Color(0xFF007AFF) // iOS blue
 
     if (isPresented) {
@@ -179,7 +179,7 @@ fun LocationChannelsSheet(
                                             text = stringResource(R.string.location_permission_granted),
                                             fontSize = 11.sp,
                                             fontFamily = FontFamily.Monospace,
-                                            color = standardGreen
+                                            color = standardPrimary
                                         )
                                     }
                                 }
@@ -221,7 +221,7 @@ fun LocationChannelsSheet(
                                 title = geohashTitleWithCount(channel, participantCount),
                                 subtitle = subtitlePrefix + (namePart?.let { " • $it" } ?: ""),
                                 isSelected = isChannelSelected(channel, selectedChannel),
-                                titleColor = standardGreen,
+                                titleColor = standardPrimary,
                                 titleBold = highlight,
                                 trailingContent = {
                                 IconButton(onClick = { bookmarksStore.toggle(channel.geohash) }) {
@@ -487,12 +487,12 @@ fun LocationChannelsSheet(
                                     containerColor = if (locationServicesEnabled) {
                                         Color.Red.copy(alpha = 0.08f)
                                     } else {
-                                        standardGreen.copy(alpha = 0.12f)
+                                        standardPrimary.copy(alpha = 0.12f)
                                     },
                                     contentColor = if (locationServicesEnabled) {
                                         Color(0xFFBF1A1A)
                                     } else {
-                                        standardGreen
+                                        standardPrimary
                                     }
                                 ),
                                 modifier = Modifier.fillMaxWidth()
@@ -620,7 +620,7 @@ private fun ChannelRow(
                     Icon(
                         imageVector = Icons.Filled.Check,
                         contentDescription = stringResource(R.string.cd_selected),
-                        tint = Color(0xFF32D74B), // iOS green for checkmark
+                        tint = MaterialTheme.colorScheme.primary, // Dynamic checkmark
                         modifier = Modifier.size(20.dp)
                     )
                 }

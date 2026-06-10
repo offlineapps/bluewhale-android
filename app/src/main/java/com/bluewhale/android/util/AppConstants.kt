@@ -41,6 +41,12 @@ object AppConstants {
         const val MAX_FRAGMENT_SIZE: Int = 469
         const val FRAGMENT_TIMEOUT_MS: Long = 30_000L
         const val CLEANUP_INTERVAL_MS: Long = 10_000L
+        
+        // Hardening limits
+        const val MAX_FRAGMENTS_PER_ID = 256
+        const val MAX_ACTIVE_SETS = 64
+        const val MAX_SET_BYTES = 1_048_576 // 1MB
+        const val MAX_GLOBAL_BYTES = 4L * 1_048_576L // 4MB
     }
 
     object Security {

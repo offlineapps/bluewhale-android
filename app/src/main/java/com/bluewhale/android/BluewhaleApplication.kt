@@ -3,10 +3,11 @@ package com.bluewhale.android
 import android.app.Application
 import com.bluewhale.android.nostr.RelayDirectory
 import com.bluewhale.android.ui.theme.ThemePreferenceManager
+import com.bluewhale.android.ui.theme.TextColorPreferenceManager
 import com.bluewhale.android.net.ArtiTorManager
 
 /**
- * Main application class for bluewhale Android
+ * Main application class for bitchat Android
  */
 class BluewhaleApplication : Application() {
 
@@ -37,6 +38,7 @@ class BluewhaleApplication : Application() {
 
         // Initialize theme preference
         ThemePreferenceManager.init(this)
+        TextColorPreferenceManager.init(this)
 
         // Initialize debug preference manager (persists debug toggles)
         try { com.bluewhale.android.ui.debug.DebugPreferenceManager.init(this) } catch (_: Exception) { }
@@ -49,6 +51,9 @@ class BluewhaleApplication : Application() {
 
         // Initialize mesh service preferences
         try { com.bluewhale.android.service.MeshServicePreferences.init(this) } catch (_: Exception) { }
+
+        // Initialize SMS gateway preferences so saved settings survive app restarts
+        try { com.bluewhale.android.smsgateway.SmsGatewayPreferenceManager.init(this) } catch (_: Exception) { }
 
         // Proactively start the foreground service to keep mesh alive
         try { com.bluewhale.android.service.MeshForegroundService.start(this) } catch (_: Exception) { }

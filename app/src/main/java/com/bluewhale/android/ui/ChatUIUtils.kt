@@ -57,7 +57,7 @@ fun formatMessageAsAnnotatedString(
     if (message.sender != "system") {
         // Get base color for this peer (iOS-style color assignment)
         val baseColor = if (isSelf) {
-            Color(0xFFFF9500) // Orange for self (iOS orange)
+            colorScheme.primary // Dynamic color for self
         } else {
             getPeerColor(message, isDark)
         }
@@ -117,7 +117,7 @@ fun formatMessageAsAnnotatedString(
         builder.pop()
         
         // Message content with iOS-style hashtag and mention highlighting
-        appendIOSFormattedContent(builder, message.content, message.mentions, currentUserNickname, baseColor, isSelf, isDark)
+        appendIOSFormattedContent(builder, message.content, message.mentions, currentUserNickname, baseColor, colorScheme.primary, isSelf, isDark)
         
         // iOS-style timestamp at the END (smaller, grey)
         // Timestamp (and optional PoW badge)
@@ -174,7 +174,7 @@ fun formatMessageHeaderAnnotatedString(
             message.sender.startsWith("$currentUserNickname#")
 
     if (message.sender != "system") {
-        val baseColor = if (isSelf) Color(0xFFFF9500) else getPeerColor(message, isDark)
+        val baseColor = if (isSelf) colorScheme.primary else getPeerColor(message, isDark)
         val (baseName, suffix) = splitSuffix(message.sender)
 
         // "<@"
@@ -337,6 +337,7 @@ private fun appendIOSFormattedContent(
     mentions: List<String>?,
     currentUserNickname: String,
     baseColor: Color,
+    primaryColor: Color,
     isSelf: Boolean,
     isDark: Boolean
 ) {
@@ -442,7 +443,7 @@ private fun appendIOSFormattedContent(
                 
                 // Check if this mention targets current user
                 val isMentionToMe = mBase == currentUserNickname
-                val mentionColor = if (isMentionToMe) Color(0xFFFF9500) else baseColor
+                val mentionColor = if (isMentionToMe) primaryColor else baseColor
                 
                 // "@" symbol
                 builder.pushStyle(SpanStyle(

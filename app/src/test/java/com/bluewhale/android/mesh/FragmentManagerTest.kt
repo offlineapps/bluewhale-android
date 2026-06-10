@@ -1,6 +1,6 @@
 package com.bluewhale.android.mesh
 
-import com.bluewhale.android.protocol.BluewhalePacket
+import com.bluewhale.android.protocol.BitchatPacket
 import com.bluewhale.android.protocol.MessageType
 import com.bluewhale.android.model.FragmentPayload
 import org.junit.Assert.assertEquals
@@ -30,7 +30,7 @@ class FragmentManagerTest {
         val payload = ByteArray(1000)
         Random().nextBytes(payload)
 
-        val packet = BluewhalePacket(
+        val packet = BitchatPacket(
             version = 1u,
             type = MessageType.MESSAGE.value,
             senderID = hexStringToByteArray(senderID),
@@ -69,7 +69,7 @@ class FragmentManagerTest {
             hexStringToByteArray("1234567890ABCDEF")
         )
 
-        val packet = BluewhalePacket(
+        val packet = BitchatPacket(
             version = 2u,
             type = MessageType.MESSAGE.value,
             senderID = hexStringToByteArray(senderID),
@@ -103,7 +103,7 @@ class FragmentManagerTest {
         Random().nextBytes(payload)
         
         // 1. Without route
-        val packetNoRoute = BluewhalePacket(
+        val packetNoRoute = BitchatPacket(
             version = 1u,
             type = MessageType.MESSAGE.value,
             senderID = hexStringToByteArray(senderID),
@@ -119,7 +119,7 @@ class FragmentManagerTest {
         
         // 2. With large route (e.g., 5 hops)
         val route = List(5) { hexStringToByteArray("000000000000000$it") }
-        val packetWithRoute = BluewhalePacket(
+        val packetWithRoute = BitchatPacket(
             version = 2u,
             type = MessageType.MESSAGE.value,
             senderID = hexStringToByteArray(senderID),
@@ -150,7 +150,7 @@ class FragmentManagerTest {
         val originalPayload = ByteArray(1500)
         Random().nextBytes(originalPayload)
         
-        val originalPacket = BluewhalePacket(
+        val originalPacket = BitchatPacket(
             version = 1u,
             type = MessageType.FILE_TRANSFER.value,
             senderID = hexStringToByteArray(senderID),
@@ -162,11 +162,7 @@ class FragmentManagerTest {
         
         val fragments = fragmentManager.createFragments(originalPacket)
         
-        var reassembledPacket: BluewhalePacket? = null
-        
-        // Feed fragments back into FragmentManager
-        // Note: FragmentManager stores state in incomingFragments
-        
+        var reassembledPacket: BitchatPacket? = null
         for (fragment in fragments) {
             val result = fragmentManager.handleFragment(fragment)
             if (result != null) {
@@ -178,6 +174,128 @@ class FragmentManagerTest {
         assertEquals("Type should match", originalPacket.type, reassembledPacket!!.type)
         assertEquals("Payload size should match", originalPacket.payload.size, reassembledPacket.payload.size)
         assertTrue("Payload content should match", originalPacket.payload.contentEquals(reassembledPacket.payload))
+    }
+
+    @Test
+    fun `test max active sets eviction`() {
+        val limits = com.bluewhale.android.util.AppConstants.Fragmentation
+        val maxSets = limits.MAX_ACTIVE_SETS
+        
+        // Create fragments for maxSets + 1 different messages
+        val packets = (0..maxSets).map { i ->
+            val id = ByteArray(8)
+            Random().nextBytes(id)
+            FragmentPayload(
+                fragmentID = id,
+                index = 0,
+                total = 2,
+                originalType = MessageType.MESSAGE.value,
+                data = ByteArray(10)
+            )
+        }
+
+        // Add first packet to manager
+        val firstFragID = packets[0].getFragmentIDString()
+        fragmentManager.handleFragment(createBitchatPacketFromFragment(packets[0]))
+        
+        // Add all others
+        for (i in 1..maxSets) {
+            fragmentManager.handleFragment(createBitchatPacketFromFragment(packets[i]))
+        }
+
+        // The first one should have been evicted (LRU)
+        val debugInfo = fragmentManager.getDebugInfo()
+        assertTrue("First fragment ID should not be in debug info after eviction", !debugInfo.contains(firstFragID))
+        assertTrue("Debug info should show max active sets", debugInfo.contains("Active Fragment Sets: $maxSets"))
+    }
+
+    @Test
+    fun `test global bytes eviction`() {
+        val limits = com.bluewhale.android.util.AppConstants.Fragmentation
+        val maxGlobalBytes = limits.MAX_GLOBAL_BYTES
+        
+        // Create fragments that together exceed maxGlobalBytes
+        // Each fragment is 1MB, limit is 4MB.
+        val dataSize = 1_000_000
+        val payload1 = createLargeFragmentPayload(dataSize, "ID000001")
+        val payload2 = createLargeFragmentPayload(dataSize, "ID000002")
+        val payload3 = createLargeFragmentPayload(dataSize, "ID000003")
+        val payload4 = createLargeFragmentPayload(dataSize, "ID000004")
+        val payload5 = createLargeFragmentPayload(dataSize, "ID000005") // This should trigger eviction
+
+        fragmentManager.handleFragment(createBitchatPacketFromFragment(payload1))
+        fragmentManager.handleFragment(createBitchatPacketFromFragment(payload2))
+        fragmentManager.handleFragment(createBitchatPacketFromFragment(payload3))
+        fragmentManager.handleFragment(createBitchatPacketFromFragment(payload4))
+        
+        assertTrue("Should have 4 sets", fragmentManager.getDebugInfo().contains("Active Fragment Sets: 4"))
+        
+        fragmentManager.handleFragment(createBitchatPacketFromFragment(payload5))
+        
+        val debugInfo = fragmentManager.getDebugInfo()
+        assertTrue("Should still have 4 or fewer sets after eviction", !debugInfo.contains("Active Fragment Sets: 5"))
+        assertTrue("First ID should be evicted", !debugInfo.contains("ID000001"))
+    }
+
+    @Test
+    fun `test max set bytes rejection`() {
+        val limits = com.bluewhale.android.util.AppConstants.Fragmentation
+        val maxSetBytes = limits.MAX_SET_BYTES
+        
+        // Create a fragment that exceeds maxSetBytes (e.g. 2MB)
+        val oversizedData = ByteArray(maxSetBytes + 100)
+        val payload = FragmentPayload(
+            fragmentID = "TOOLARGE".toByteArray(),
+            index = 0,
+            total = 1,
+            originalType = MessageType.MESSAGE.value,
+            data = oversizedData
+        )
+        
+        val result = fragmentManager.handleFragment(createBitchatPacketFromFragment(payload))
+        assertEquals("Should reject oversized fragment set", null, result)
+        assertTrue("Should not be in maps", !fragmentManager.getDebugInfo().contains("TOOLARGE"))
+    }
+
+    @Test
+    fun `test max fragments per id rejection`() {
+        val limits = com.bluewhale.android.util.AppConstants.Fragmentation
+        val maxFragments = limits.MAX_FRAGMENTS_PER_ID
+        
+        val payload = FragmentPayload(
+            fragmentID = "MANYFRAG".toByteArray(),
+            index = 0,
+            total = maxFragments + 1,
+            originalType = MessageType.MESSAGE.value,
+            data = ByteArray(10)
+        )
+        
+        val result = fragmentManager.handleFragment(createBitchatPacketFromFragment(payload))
+        assertEquals("Should reject message with too many fragments", null, result)
+    }
+
+    private fun createBitchatPacketFromFragment(payload: FragmentPayload): BitchatPacket {
+        return BitchatPacket(
+            version = 1u,
+            type = MessageType.FRAGMENT.value,
+            senderID = hexStringToByteArray(senderID),
+            recipientID = hexStringToByteArray(recipientID),
+            timestamp = System.currentTimeMillis().toULong(),
+            payload = payload.encode(),
+            ttl = 7u
+        )
+    }
+
+    private fun createLargeFragmentPayload(size: Int, idString: String): FragmentPayload {
+        val id = idString.toByteArray()
+        val data = ByteArray(size)
+        return FragmentPayload(
+            fragmentID = id,
+            index = 0,
+            total = 2, // 2 fragments so it's not immediately reassembled
+            originalType = MessageType.MESSAGE.value,
+            data = data
+        )
     }
 
     private fun hexStringToByteArray(hexString: String): ByteArray {
