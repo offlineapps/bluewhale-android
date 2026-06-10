@@ -6,6 +6,14 @@ on:
     tags:
       - 'v*.*.*' # Triggers for tags like v1.0.0
 
+# Signed release builds require these repository secrets:
+#   SIGNING_KEYSTORE_BASE64 - base64 of the release keystore: base64 -w0 bluewhale-release.keystore
+#   SIGNING_STORE_PASSWORD  - keystore password
+#   SIGNING_KEY_ALIAS       - key alias
+#   SIGNING_KEY_PASSWORD    - key password
+# Note: CI produces signed APKs + plain SHA256SUMS. The detached PGP signature
+# (SHA256SUMS.asc) is created manually so the signing key never lives in CI.
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -38,45 +46,48 @@ jobs:
       - name: Grant execute permission for Gradlew
         run: chmod +x ./gradlew
 
-      - name: Build Release APKs (with architecture splits)
+      - name: Decode signing keystore
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: echo "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/release.keystore"
+
+      - name: Create keystore.properties
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          cat > keystore.properties <<EOF
+          storeFile=$GITHUB_WORKSPACE/release.keystore
+          storePassword=$SIGNING_STORE_PASSWORD
+          keyAlias=$SIGNING_KEY_ALIAS
+          keyPassword=$SIGNING_KEY_PASSWORD
+          EOF
+
+      - name: Build signed release APKs (with architecture splits)
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
-      - name: List APK files
-        run: |
-          echo "APK files built:"
-          find app/build/outputs/apk/release -name "*.apk" -type f -exec ls -lh {} \;
-
-      - name: Rename APKs for GitHub Release
+      - name: Rename APKs and generate checksums
         run: |
           cd app/build/outputs/apk/release
-          [ -f "app-arm64-v8a-release-unsigned.apk" ] && mv app-arm64-v8a-release-unsigned.apk bitchat-android-arm64.apk
-          [ -f "app-x86_64-release-unsigned.apk" ] && mv app-x86_64-release-unsigned.apk bitchat-android-x86_64.apk
-          [ -f "app-universal-release-unsigned.apk" ] && mv app-universal-release-unsigned.apk bitchat-android-universal.apk
+          for abi in arm64-v8a armeabi-v7a x86 x86_64 universal; do
+            [ -f "app-$abi-release.apk" ] && mv "app-$abi-release.apk" "bluewhale-${{ github.ref_name }}-$abi.apk"
+          done
+          sha256sum bluewhale-*.apk > SHA256SUMS
+          echo "Built artifacts:"; ls -lh
 
-      - name: DEBUG
+      - name: Verify signing
         run: |
-          set -x
-          pwd
-          ls -all
-          cd app/build/outputs/
-          ls -all
-          tree || ls -R
-
-      # Optional: Sign APKs (uncomment and configure secrets when ready)
-      # - name: Sign APKs
-      #   uses: r0adkll/sign-android-release@v1
-      #   with:
-      #     releaseDirectory: app/build/outputs/apk/release
-      #     signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-      #     alias: ${{ secrets.ALIAS }}
-      #     keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-      #     keyPassword: ${{ secrets.KEY_PASSWORD }}
+          APKSIGNER=$(find "$ANDROID_HOME"/build-tools -name apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify app/build/outputs/apk/release/bluewhale-${{ github.ref_name }}-universal.apk
 
       - name: Upload APKs as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: bitchat-android-release-${{ github.ref_name }}
-          path: app/build/outputs/apk/release/*.apk
+          name: bluewhale-release-${{ github.ref_name }}
+          path: |
+            app/build/outputs/apk/release/bluewhale-*.apk
+            app/build/outputs/apk/release/SHA256SUMS
           retention-days: 30
           if-no-files-found: error
 
@@ -88,20 +99,18 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          name: bitchat-android-release-${{ github.ref_name }}
+          name: bluewhale-release-${{ github.ref_name }}
           path: release
 
-      - name: Create GitHub Release
+      - name: Create draft GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           files: |
-            release/bitchat-android-arm64.apk
-            release/bitchat-android-x86_64.apk
-            release/bitchat-android-universal.apk
-          name: Release ${{ github.ref_name }}
+            release/bluewhale-*.apk
+            release/SHA256SUMS
+          name: bluewhale ${{ github.ref_name }}
           body: |
-            **bitchat-android-arm64.apk** - ARM64 (most phones)
-            **bitchat-android-x86_64.apk** - x86_64 (Chromebooks, tablets)
-            **bitchat-android-universal.apk** - All architectures (fallback)
+            Signed APKs for ${{ github.ref_name }}. Verify downloads against SHA256SUMS.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
