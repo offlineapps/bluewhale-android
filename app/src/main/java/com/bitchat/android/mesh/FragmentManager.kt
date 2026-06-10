@@ -28,11 +28,27 @@ class FragmentManager {
         private const val CLEANUP_INTERVAL = com.bitchat.android.util.AppConstants.Fragmentation.CLEANUP_INTERVAL_MS     // 10 seconds cleanup check
     }
     
-    // Fragment storage - iOS equivalent: incomingFragments: [String: [Int: Data]]
-    private val incomingFragments = ConcurrentHashMap<String, MutableMap<Int, ByteArray>>()
-    // iOS equivalent: fragmentMetadata: [String: (type: UInt8, total: Int, timestamp: Date)]
-    private val fragmentMetadata = ConcurrentHashMap<String, Triple<UByte, Int, Long>>() // originalType, totalFragments, timestamp
-    
+    data class FragmentSet(
+        val fragmentId: String,
+        val total: Int,
+        val type: UByte,
+        val createdAt: Long,
+        val fragments: Array<ByteArray?>,
+        var receivedCount: Int = 0,
+        var totalBytes: Int = 0
+    ) {
+        fun isComplete(): Boolean = receivedCount == total
+    }
+
+    private val sets = LinkedHashMap<String, FragmentSet>(
+        16, 0.75f, true // LRU (access order)
+    )
+
+    private val locks = ConcurrentHashMap<String, Any>()
+
+    private val globalLock = Any()
+    private var globalBytes: Long = 0L
+
     // Delegate for callbacks
     var delegate: FragmentManagerDelegate? = null
     
@@ -147,85 +163,194 @@ class FragmentManager {
     }
     
     /**
-     * Handle incoming fragment - 100% iOS Compatible  
-     * Matches iOS handleFragment() implementation exactly
+     * Handle incoming fragment - 100% iOS Compatible
+     * Hardened with memory limits and LRU eviction.
      */
     fun handleFragment(packet: BitchatPacket): BitchatPacket? {
-        // iOS: guard packet.payload.count > 13 else { return }
         if (packet.payload.size < FragmentPayload.HEADER_SIZE) {
             Log.w(TAG, "Fragment packet too small: ${packet.payload.size}")
             return null
         }
-        
-        // Don't process our own fragments - iOS equivalent check
-        // This would be done at a higher level but we'll include for safety
-        
+
         try {
-            // Use FragmentPayload for type-safe decoding
             val fragmentPayload = FragmentPayload.decode(packet.payload)
             if (fragmentPayload == null || !fragmentPayload.isValid()) {
                 Log.w(TAG, "Invalid fragment payload")
                 return null
             }
-            
-            // iOS: let fragmentID = packet.payload[0..<8].map { String(format: "%02x", $0) }.joined()
+
             val fragmentIDString = fragmentPayload.getFragmentIDString()
-            
-            Log.d(TAG, "Received fragment ${fragmentPayload.index}/${fragmentPayload.total} for fragmentID: $fragmentIDString, originalType: ${fragmentPayload.originalType}")
-            
-            // iOS: if incomingFragments[fragmentID] == nil
-            if (!incomingFragments.containsKey(fragmentIDString)) {
-                incomingFragments[fragmentIDString] = mutableMapOf()
-                fragmentMetadata[fragmentIDString] = Triple(
-                    fragmentPayload.originalType, 
-                    fragmentPayload.total, 
-                    System.currentTimeMillis()
-                )
+            val limits = com.bitchat.android.util.AppConstants.Fragmentation
+
+            if (fragmentPayload.total > limits.MAX_FRAGMENTS_PER_ID) {
+                Log.w(TAG, "Rejecting fragment with excessive total count: ${fragmentPayload.total}")
+                return null
             }
-            
-            // iOS: incomingFragments[fragmentID]?[index] = Data(fragmentData)
-            incomingFragments[fragmentIDString]?.put(fragmentPayload.index, fragmentPayload.data)
-            
-            // iOS: if let fragments = incomingFragments[fragmentID], fragments.count == total
-            val fragmentMap = incomingFragments[fragmentIDString]
-            if (fragmentMap != null && fragmentMap.size == fragmentPayload.total) {
-                Log.d(TAG, "All fragments received for $fragmentIDString, reassembling...")
-                
-                // iOS reassembly logic: for i in 0..<total { if let fragment = fragments[i] { reassembled.append(fragment) } }
-                val reassembledData = mutableListOf<Byte>()
-                for (i in 0 until fragmentPayload.total) {
-                    fragmentMap[i]?.let { data ->
-                        reassembledData.addAll(data.asIterable())
+
+            val lock = lockFor(fragmentIDString)
+
+            synchronized(lock) {
+                val now = System.currentTimeMillis()
+
+                var set = synchronized(globalLock) { sets[fragmentIDString] }
+
+                if (set == null) {
+                    synchronized(globalLock) {
+                        evictIfNeeded()
+                        if (sets.size >= limits.MAX_ACTIVE_SETS) return null
+                    }
+
+                    set = FragmentSet(
+                        fragmentId = fragmentIDString,
+                        total = fragmentPayload.total,
+                        type = fragmentPayload.originalType,
+                        createdAt = now,
+                        fragments = arrayOfNulls(fragmentPayload.total)
+                    )
+
+                    synchronized(globalLock) {
+                        sets[fragmentIDString] = set
+                    }
+                    Log.d(TAG, "New fragment set created: $fragmentIDString (total: ${set.total})")
+                } else {
+                    if (set.total != fragmentPayload.total ||
+                        set.type != fragmentPayload.originalType
+                    ) {
+                        Log.w(TAG, "Rejecting fragment due to metadata mismatch for $fragmentIDString")
+                        removeSet(fragmentIDString)
+                        return null
                     }
                 }
-                
-                // Decode the original packet bytes we reassembled, so flags/compression are preserved - iOS fix
-                val originalPacket = BitchatPacket.fromBinaryData(reassembledData.toByteArray())
-                if (originalPacket != null) {
-                    // iOS cleanup: incomingFragments.removeValue(forKey: fragmentID)
-                    incomingFragments.remove(fragmentIDString)
-                    fragmentMetadata.remove(fragmentIDString)
-                    
-                    // Suppress re-broadcast of the reassembled packet by zeroing TTL.
-                    // We already relayed the incoming fragments; setting TTL=0 ensures
-                    // PacketRelayManager will skip relaying this reconstructed packet.
-                    val suppressedTtlPacket = originalPacket.copy(ttl = 0u.toUByte())
-                    Log.d(TAG, "Successfully reassembled original (${reassembledData.size} bytes); set TTL=0 to suppress relay")
-                    return suppressedTtlPacket
-                } else {
-                    val metadata = fragmentMetadata[fragmentIDString]
-                    Log.e(TAG, "Failed to decode reassembled packet (type=${metadata?.first}, total=${metadata?.second})")
+
+                val existing = set.fragments[fragmentPayload.index]
+                val oldSize = existing?.size ?: 0
+                val newSize = fragmentPayload.data.size
+
+                val newTotalSizeOfSet = set.totalBytes - oldSize + newSize
+
+                if (newTotalSizeOfSet > limits.MAX_SET_BYTES) {
+                    Log.w(TAG, "Rejecting fragment set $fragmentIDString for exceeding per-set limit")
+                    removeSet(fragmentIDString)
+                    return null
                 }
-            } else {
-                val received = fragmentMap?.size ?: 0
-                Log.d(TAG, "Fragment ${fragmentPayload.index} stored, have $received/${fragmentPayload.total} fragments for $fragmentIDString")
+
+                val delta = (newSize - oldSize).toLong()
+
+                synchronized(globalLock) {
+                    if (globalBytes + delta > limits.MAX_GLOBAL_BYTES) {
+                        evictUntil(delta)
+                        if (globalBytes + delta > limits.MAX_GLOBAL_BYTES) {
+                            Log.e(TAG, "Failed to evict enough space for fragment")
+                            return null
+                        }
+                    }
+                    globalBytes += delta
+                }
+
+                if (existing == null) {
+                    set.receivedCount++
+                }
+
+                set.fragments[fragmentPayload.index] = fragmentPayload.data
+                set.totalBytes = newTotalSizeOfSet
+
+                if (set.isComplete()) {
+                    Log.d(TAG, "All fragments received for $fragmentIDString, reassembling...")
+                    val reassembledPacket = reassemble(set)
+                    removeSet(fragmentIDString)
+                    return reassembledPacket
+                } else {
+                    Log.d(TAG, "Fragment ${fragmentPayload.index} stored, have ${set.receivedCount}/${set.total} fragments for $fragmentIDString")
+                }
             }
-            
+
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to handle fragment: ${e.message}")
+            Log.e(TAG, "Error handling fragment: ${e.message}", e)
+        }
+
+        return null
+    }
+
+    private fun lockFor(id: String): Any {
+        return locks.computeIfAbsent(id) { Any() }
+    }
+
+    private fun removeSet(id: String) {
+        val lock = lockFor(id)
+
+        synchronized(lock) {
+            val removed: FragmentSet?
+
+            synchronized(globalLock) {
+                removed = sets.remove(id)
+                locks.remove(id)
+            }
+
+            if (removed != null) {
+                synchronized(globalLock) {
+                    globalBytes = (globalBytes - removed.totalBytes).coerceAtLeast(0)
+                }
+            }
+        }
+    }
+
+    private fun reassemble(set: FragmentSet): BitchatPacket? {
+        val buffer = ByteArray(set.totalBytes)
+
+        var offset = 0
+        for (i in 0 until set.total) {
+            val fragment = set.fragments[i] ?: run {
+                Log.e(TAG, "Missing fragment at index $i during reassembly")
+                return null
+            }
+            System.arraycopy(fragment, 0, buffer, offset, fragment.size)
+            offset += fragment.size
+        }
+
+        val packet = BitchatPacket.fromBinaryData(buffer)
+        if (packet == null) {
+            Log.e(TAG, "Failed to decode reassembled packet")
+            return null
         }
         
-        return null
+        // Suppress re-broadcast of the reassembled packet by zeroing TTL.
+        return packet.copy(ttl = 0u.toUByte())
+    }
+
+    private fun evictIfNeeded() {
+        val maxActive = com.bitchat.android.util.AppConstants.Fragmentation.MAX_ACTIVE_SETS
+        synchronized(globalLock) {
+            while (sets.size >= maxActive) {
+                if (!evictOne()) break
+            }
+        }
+    }
+
+    private fun evictUntil(required: Long) {
+        val maxGlobal = com.bitchat.android.util.AppConstants.Fragmentation.MAX_GLOBAL_BYTES
+        synchronized(globalLock) {
+            while (globalBytes + required > maxGlobal) {
+                if (!evictOne()) break
+            }
+        }
+    }
+
+    private fun evictOne(): Boolean {
+        synchronized(globalLock) {
+            val iterator = sets.entries.iterator()
+            if (!iterator.hasNext()) return false
+
+            val entry = iterator.next()
+            val id = entry.key
+            val set = entry.value
+            
+            iterator.remove()
+            globalBytes = (globalBytes - set.totalBytes).coerceAtLeast(0)
+            locks.remove(id)
+
+            Log.d(TAG, "Evicted fragment set $id to free ${set.totalBytes} bytes")
+            return true
+        }
     }
     
     /**
@@ -250,13 +375,12 @@ class FragmentManager {
         val now = System.currentTimeMillis()
         val cutoff = now - FRAGMENT_TIMEOUT
         
-        // iOS: let oldFragments = fragmentMetadata.filter { $0.value.timestamp < cutoff }.map { $0.key }
-        val oldFragments = fragmentMetadata.filter { it.value.third < cutoff }.map { it.key }
+        val oldFragments = synchronized(globalLock) {
+            sets.filter { it.value.createdAt < cutoff }.map { it.key }
+        }
         
-        // iOS: for fragmentID in oldFragments { incomingFragments.removeValue(forKey: fragmentID) }
         for (fragmentID in oldFragments) {
-            incomingFragments.remove(fragmentID)
-            fragmentMetadata.remove(fragmentID)
+            removeSet(fragmentID)
         }
         
         if (oldFragments.isNotEmpty()) {
@@ -270,15 +394,16 @@ class FragmentManager {
     fun getDebugInfo(): String {
         return buildString {
             appendLine("=== Fragment Manager Debug Info (iOS Compatible) ===")
-            appendLine("Active Fragment Sets: ${incomingFragments.size}")
-            appendLine("Fragment Size Threshold: $FRAGMENT_SIZE_THRESHOLD bytes")
-            appendLine("Max Fragment Size: $MAX_FRAGMENT_SIZE bytes")
-            
-            fragmentMetadata.forEach { (fragmentID, metadata) ->
-                val (originalType, totalFragments, timestamp) = metadata
-                val received = incomingFragments[fragmentID]?.size ?: 0
-                val ageSeconds = (System.currentTimeMillis() - timestamp) / 1000
-                appendLine("  - $fragmentID: $received/$totalFragments fragments, type: $originalType, age: ${ageSeconds}s")
+            synchronized(globalLock) {
+                appendLine("Active Fragment Sets: ${sets.size}")
+                appendLine("Global Bytes Saved: $globalBytes bytes")
+                appendLine("Fragment Size Threshold: $FRAGMENT_SIZE_THRESHOLD bytes")
+                appendLine("Max Fragment Size: $MAX_FRAGMENT_SIZE bytes")
+                
+                sets.forEach { (fragmentID, set) ->
+                    val ageSeconds = (System.currentTimeMillis() - set.createdAt) / 1000
+                    appendLine("  - $fragmentID: ${set.receivedCount}/${set.total} fragments, type: ${set.type}, age: ${ageSeconds}s, bytes: ${set.totalBytes}")
+                }
             }
         }
     }
@@ -299,8 +424,11 @@ class FragmentManager {
      * Clear all fragments
      */
     fun clearAllFragments() {
-        incomingFragments.clear()
-        fragmentMetadata.clear()
+        synchronized(globalLock) {
+            sets.clear()
+            locks.clear()
+            globalBytes = 0
+        }
     }
     
     /**
