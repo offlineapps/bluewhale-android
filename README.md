@@ -8,7 +8,7 @@ A peer-to-peer messaging app that works over Bluetooth mesh networks. Bluewhale 
 
 ## Install bluewhale
 
-You can download the latest version of bluewhale for Android from the [GitHub Releases page](https://github.com/permissionlesstech/bluewhale-android/releases).
+You can download the latest version of bluewhale for Android from the [GitHub Releases page](https://github.com/offlineapps/bluewhale-android/releases).
 
 **Instructions:**
 
@@ -29,7 +29,7 @@ You can download the latest version of bluewhale for Android from the [GitHub Re
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/permissionlesstech/bluewhale-android.git
+   git clone https://github.com/offlineapps/bluewhale-android.git
    cd bluewhale-android
    ```
 
