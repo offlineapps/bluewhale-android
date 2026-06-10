@@ -34,7 +34,12 @@ object WebhookForwarder {
             Log.w(TAG, "Cannot forward SMS: Webhook URL is empty")
             return@withContext false
         }
-        
+        // Require HTTPS so SMS contents are never forwarded in cleartext.
+        if (!webhookUrl.startsWith("https://", ignoreCase = true)) {
+            Log.w(TAG, "Refusing to forward SMS: Webhook URL must use https")
+            return@withContext false
+        }
+
         try {
             // Create JSON payload
             val json = JsonObject().apply {
