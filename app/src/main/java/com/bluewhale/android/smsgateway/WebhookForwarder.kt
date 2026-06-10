@@ -54,7 +54,7 @@ object WebhookForwarder {
             val request = Request.Builder()
                 .url(webhookUrl)
                 .post(requestBody)
-                .addHeader("User-Agent", "Bitchat")
+                .addHeader("User-Agent", "Bluewhale")
                 .build()
                 
             Log.d(TAG, "Forwarding SMS from $sender to webhook: $webhookUrl")

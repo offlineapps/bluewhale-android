@@ -7,7 +7,7 @@ import com.bluewhale.android.ui.theme.TextColorPreferenceManager
 import com.bluewhale.android.net.ArtiTorManager
 
 /**
- * Main application class for bitchat Android
+ * Main application class for bluewhale Android
  */
 class BluewhaleApplication : Application() {
 
