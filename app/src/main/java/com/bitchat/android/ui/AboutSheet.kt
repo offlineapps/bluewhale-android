@@ -35,6 +35,11 @@ import com.bitchat.android.core.ui.component.sheet.BitchatBottomSheet
 import com.bitchat.android.net.TorMode
 import com.bitchat.android.net.TorPreferenceManager
 import com.bitchat.android.net.ArtiTorManager
+import com.bitchat.android.smsgateway.SmsGatewaySettingsScreen
+import com.bitchat.android.smsgateway.GatewayDirectoryScreen
+import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.foundation.clickable
 
 /**
  * Feature row for displaying app capabilities
@@ -276,6 +281,19 @@ fun AboutSheet(
 
     val colorScheme = MaterialTheme.colorScheme
     val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
+    
+    var showSmsSettings by remember { mutableStateOf(false) }
+    var showSmsDirectory by remember { mutableStateOf(false) }
+    
+    if (showSmsSettings) {
+        SmsGatewaySettingsScreen(onDismiss = { showSmsSettings = false })
+        return
+    }
+    
+    if (showSmsDirectory) {
+        GatewayDirectoryScreen(onDismiss = { showSmsDirectory = false })
+        return
+    }
     
     if (isPresented) {
         BitchatBottomSheet(
@@ -558,6 +576,88 @@ fun AboutSheet(
                                             }
                                         } else null
                                     )
+                                    
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+                                    
+                                    // SMS Settings Button
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { showSmsSettings = true }
+                                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Sms,
+                                            contentDescription = null,
+                                            tint = colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.width(14.dp))
+                                        
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Text(
+                                                text = "SMS Gateway",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                color = colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Configure this device to forward SMS to Webhook",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colorScheme.onSurface.copy(alpha = 0.6f),
+                                                lineHeight = 16.sp
+                                            )
+                                        }
+                                    }
+                                    
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+                                    
+                                    // SMS Directory Button
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { showSmsDirectory = true }
+                                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Contacts,
+                                            contentDescription = null,
+                                            tint = colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.width(14.dp))
+                                        
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Text(
+                                                text = "Gateway Directory",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                color = colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Discover SMS Gateways",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colorScheme.onSurface.copy(alpha = 0.6f),
+                                                lineHeight = 16.sp
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             

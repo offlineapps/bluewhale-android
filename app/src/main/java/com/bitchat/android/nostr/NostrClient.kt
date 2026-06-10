@@ -221,6 +221,67 @@ class NostrClient private constructor(private val context: Context) {
     }
     
     /**
+     * Publish this device as an SMS Webhook Gateway
+     */
+    fun publishSmsGatewayPresence(
+        gatewayName: String,
+        webhookUrl: String,
+        phoneNumber: String,
+        onSuccess: (() -> Unit)? = null,
+        onError: ((String) -> Unit)? = null
+    ) {
+        val identity = currentIdentity
+        if (identity == null) {
+            onError?.invoke("Nostr client not initialized")
+            return
+        }
+        
+        scope.launch {
+            try {
+                val event = NostrProtocol.createSmsGatewayPresenceEvent(
+                    senderIdentity = identity,
+                    gatewayName = gatewayName,
+                    webhookUrl = webhookUrl,
+                    phoneNumber = phoneNumber
+                )
+                
+                relayManager.sendEvent(event)
+                Log.i(TAG, "Published SMS Gateway to Nostr")
+                onSuccess?.invoke()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to publish SMS Gateway: ${e.message}")
+                onError?.invoke("Failed to publish: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Subscribe to SMS Gateway discovery events
+     */
+    fun subscribeToSmsGateways() {
+        // Query for replaceable events (30030) with the gateway tag
+        val filter = NostrFilter.Builder()
+            .kinds(NostrKind.SMS_GATEWAY_DISCOVERY)
+            .tag("d", "bitchat-sms-gateway")
+            .limit(100)
+            .build()
+        
+        relayManager.subscribe(filter, "sms-gateways", { event ->
+            com.bitchat.android.smsgateway.SmsGatewayRegistry.processGatewayDiscoveryEvent(event)
+        })
+        
+        Log.i(TAG, "Subscribed to SMS Gateway discovery events")
+    }
+    
+    /**
+     * Unsubscribe from SMS Gateway discovery events
+     */
+    fun unsubscribeFromSmsGateways() {
+        relayManager.unsubscribe("sms-gateways")
+        Log.i(TAG, "Unsubscribed from SMS Gateways")
+    }
+    
+    /**
      * Get current identity information
      */
     fun getCurrentIdentity(): NostrIdentity? = currentIdentity

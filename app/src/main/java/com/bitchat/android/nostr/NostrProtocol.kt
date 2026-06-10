@@ -2,6 +2,7 @@ package com.bitchat.android.nostr
 
 import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -199,6 +200,37 @@ object NostrProtocol {
                 PoWPreferenceManager.stopMining()
             }
         }
+        
+        return@withContext senderIdentity.signEvent(event)
+    }
+    
+    /**
+     * Create a replaceable kind 30030 event advertising this device as an SMS Webhook Gateway
+     */
+    suspend fun createSmsGatewayPresenceEvent(
+        senderIdentity: NostrIdentity,
+        gatewayName: String,
+        webhookUrl: String,
+        phoneNumber: String
+    ): NostrEvent = withContext(Dispatchers.Default) {
+        val tags = mutableListOf<List<String>>()
+        // Requirements for a replaceable event: an identifier "d" tag
+        tags.add(listOf("d", "bitchat-sms-gateway"))
+        
+        // Build JSON content describing the gateway
+        val contentObject = JsonObject().apply {
+            addProperty("name", gatewayName)
+            addProperty("webhook_url", webhookUrl)
+            addProperty("phone_number", phoneNumber)
+        }
+        
+        val event = NostrEvent(
+            pubkey = senderIdentity.publicKeyHex,
+            createdAt = (System.currentTimeMillis() / 1000).toInt(),
+            kind = NostrKind.SMS_GATEWAY_DISCOVERY,
+            tags = tags,
+            content = contentObject.toString()
+        )
         
         return@withContext senderIdentity.signEvent(event)
     }
