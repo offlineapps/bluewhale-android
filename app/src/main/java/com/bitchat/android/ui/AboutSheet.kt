@@ -119,6 +119,56 @@ private fun ThemeChip(
 }
 
 /**
+ * Color selection chip with preview circle
+ */
+@Composable
+private fun ColorChip(
+    label: String,
+    color: Color,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    
+    Surface(
+        modifier = modifier,
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = if (selected) {
+            color.copy(alpha = 0.15f)
+        } else {
+            colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        },
+        border = if (selected) {
+            androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.5f))
+        } else null
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Surface(
+                modifier = Modifier.size(12.dp),
+                shape = CircleShape,
+                color = color
+            ) {}
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) color else colorScheme.onSurface.copy(alpha = 0.8f),
+                maxLines = 1
+            )
+        }
+    }
+}
+
+/**
  * Unified settings toggle row with icon, title, subtitle, and switch
  * Apple-like design with proper spacing
  */
@@ -358,6 +408,62 @@ fun AboutSheet(
                                         onClick = { com.bitchat.android.ui.theme.ThemePreferenceManager.set(context, com.bitchat.android.ui.theme.ThemePreference.Dark) },
                                         modifier = Modifier.weight(1f)
                                     )
+                                }
+                            }
+                        }
+                    }
+
+                    // Text Color Section
+                    item(key = "text_color") {
+                        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                            Text(
+                                text = "TEXT COLOR",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colorScheme.onBackground.copy(alpha = 0.5f),
+                                letterSpacing = 0.5.sp,
+                                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                            )
+                            val textColorPref by com.bitchat.android.ui.theme.TextColorPreferenceManager.textColorFlow.collectAsState()
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = colorScheme.surface,
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        com.bitchat.android.ui.theme.TextColorPreference.values().take(3).forEach { pref ->
+                                            ColorChip(
+                                                label = pref.displayName,
+                                                color = pref.getColor(isDark),
+                                                selected = textColorPref == pref,
+                                                onClick = { com.bitchat.android.ui.theme.TextColorPreferenceManager.set(context, pref) },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        com.bitchat.android.ui.theme.TextColorPreference.values().drop(3).forEach { pref ->
+                                            ColorChip(
+                                                label = pref.displayName,
+                                                color = pref.getColor(isDark),
+                                                selected = textColorPref == pref,
+                                                onClick = { com.bitchat.android.ui.theme.TextColorPreferenceManager.set(context, pref) },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        // Empty space to align the last two chips if there were more, 
+                                        // but we have 5 colors, so 3 + 2.
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
                                 }
                             }
                         }

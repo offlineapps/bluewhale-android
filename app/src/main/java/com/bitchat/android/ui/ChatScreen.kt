@@ -282,13 +282,13 @@ fun ChatScreen(viewModel: ChatViewModel) {
                 color = colorScheme.background,
                 tonalElevation = 3.dp,
                 shadowElevation = 6.dp,
-                border = BorderStroke(2.dp, Color(0xFF00C851))
+                border = BorderStroke(2.dp, colorScheme.primary)
             ) {
                 IconButton(onClick = { forceScrollToBottom = !forceScrollToBottom }) {
                     Icon(
                         imageVector = Icons.Filled.ArrowDownward,
                         contentDescription = stringResource(com.bitchat.android.R.string.cd_scroll_to_bottom),
-                        tint = Color(0xFF00C851)
+                        tint = colorScheme.primary
                     )
                 }
             }

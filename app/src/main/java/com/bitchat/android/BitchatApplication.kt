@@ -3,6 +3,7 @@ package com.bitchat.android
 import android.app.Application
 import com.bitchat.android.nostr.RelayDirectory
 import com.bitchat.android.ui.theme.ThemePreferenceManager
+import com.bitchat.android.ui.theme.TextColorPreferenceManager
 import com.bitchat.android.net.ArtiTorManager
 
 /**
@@ -37,6 +38,7 @@ class BitchatApplication : Application() {
 
         // Initialize theme preference
         ThemePreferenceManager.init(this)
+        TextColorPreferenceManager.init(this)
 
         // Initialize debug preference manager (persists debug toggles)
         try { com.bitchat.android.ui.debug.DebugPreferenceManager.init(this) } catch (_: Exception) { }

@@ -16,32 +16,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 
-// Colors that match the iOS bitchat theme
-private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFF39FF14),        // Bright green (terminal-like)
-    onPrimary = Color.Black,
-    secondary = Color(0xFF2ECB10),      // Darker green
-    onSecondary = Color.Black,
-    background = Color.Black,
-    onBackground = Color(0xFF39FF14),   // Green on black
-    surface = Color(0xFF111111),        // Very dark gray
-    onSurface = Color(0xFF39FF14),      // Green text
-    error = Color(0xFFFF5555),          // Red for errors
-    onError = Color.Black
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF008000),        // Dark green
-    onPrimary = Color.White,
-    secondary = Color(0xFF006600),      // Even darker green
-    onSecondary = Color.White,
-    background = Color.White,
-    onBackground = Color(0xFF008000),   // Dark green on white
-    surface = Color(0xFFF8F8F8),        // Very light gray
-    onSurface = Color(0xFF008000),      // Dark green text
-    error = Color(0xFFCC0000),          // Dark red for errors
-    onError = Color.White
-)
 
 @Composable
 fun BitchatTheme(
@@ -50,6 +24,8 @@ fun BitchatTheme(
 ) {
     // App-level override from ThemePreferenceManager
     val themePref by ThemePreferenceManager.themeFlow.collectAsState(initial = ThemePreference.System)
+    val textColorPref by TextColorPreferenceManager.textColorFlow.collectAsState(initial = TextColorPreference.Green)
+    
     val shouldUseDark = when (darkTheme) {
         true -> true
         false -> false
@@ -60,7 +36,35 @@ fun BitchatTheme(
         }
     }
 
-    val colorScheme = if (shouldUseDark) DarkColorScheme else LightColorScheme
+    val dynamicPrimary = textColorPref.getColor(shouldUseDark)
+
+    val colorScheme = if (shouldUseDark) {
+        darkColorScheme(
+            primary = dynamicPrimary,
+            onPrimary = Color.Black,
+            secondary = dynamicPrimary.copy(alpha = 0.8f),
+            onSecondary = Color.Black,
+            background = Color.Black,
+            onBackground = dynamicPrimary,
+            surface = Color(0xFF111111),
+            onSurface = dynamicPrimary,
+            error = Color(0xFFFF5555),
+            onError = Color.Black
+        )
+    } else {
+        lightColorScheme(
+            primary = dynamicPrimary,
+            onPrimary = Color.White,
+            secondary = dynamicPrimary.copy(alpha = 0.8f),
+            onSecondary = Color.White,
+            background = Color.White,
+            onBackground = dynamicPrimary,
+            surface = Color(0xFFF8F8F8),
+            onSurface = dynamicPrimary,
+            error = Color(0xFFCC0000),
+            onError = Color.White
+        )
+    }
 
     val view = LocalView.current
     SideEffect {

@@ -53,7 +53,7 @@ import com.bitchat.android.ui.media.FilePickerButton
  * VisualTransformation that styles slash commands with background and color
  * while preserving cursor positioning and click handling
  */
-class SlashCommandVisualTransformation : VisualTransformation {
+class SlashCommandVisualTransformation(private val primaryColor: Color) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val slashCommandRegex = Regex("(/\\w+)(?=\\s|$)")
         val annotatedString = buildAnnotatedString {
@@ -68,10 +68,10 @@ class SlashCommandVisualTransformation : VisualTransformation {
                 // Add the styled slash command
                 withStyle(
                     style = SpanStyle(
-                        color = Color(0xFF00FF7F), // Bright green
+                        color = primaryColor,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Medium,
-                        background = Color(0xFF2D2D2D) // Dark gray background
+                        background = primaryColor.copy(alpha = 0.1f)
                     )
                 ) {
                     append(match.value)
@@ -205,7 +205,7 @@ fun MessageInput(
                     if (hasText) onSend() // Only send if there's text
                 }),
                 visualTransformation = CombinedVisualTransformation(
-                    listOf(SlashCommandVisualTransformation(), MentionVisualTransformation())
+                    listOf(SlashCommandVisualTransformation(colorScheme.primary), MentionVisualTransformation())
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -256,7 +256,7 @@ fun MessageInput(
         // Voice and image buttons when no text (only visible in Mesh chat)
         if (value.text.isEmpty() && showMediaButtons) {
             // Hold-to-record microphone
-            val bg = if (colorScheme.background == Color.Black) Color(0xFF00FF00).copy(alpha = 0.75f) else Color(0xFF008000).copy(alpha = 0.75f)
+            val bg = colorScheme.primary.copy(alpha = 0.75f)
 
             // Ensure latest values are used when finishing recording
             val latestSelectedPeer = rememberUpdatedState(selectedPrivatePeer)
@@ -332,10 +332,9 @@ fun MessageInput(
                             } else if (selectedPrivatePeer != null || currentChannel != null) {
                                 // Orange for both private messages and channels when enabled
                                 Color(0xFFFF9500).copy(alpha = 0.75f)
-                            } else if (colorScheme.background == Color.Black) {
-                                Color(0xFF00FF00).copy(alpha = 0.75f) // Bright green for dark theme
                             } else {
-                                Color(0xFF008000).copy(alpha = 0.75f) // Dark green for light theme
+                                // Use dynamic primary for mesh mode
+                                colorScheme.primary.copy(alpha = 0.75f)
                             },
                             shape = CircleShape
                         ),
@@ -351,10 +350,9 @@ fun MessageInput(
                         } else if (selectedPrivatePeer != null || currentChannel != null) {
                             // Black arrow on orange for both private and channel modes
                             Color.Black
-                        } else if (colorScheme.background == Color.Black) {
-                            Color.Black // Black arrow on bright green in dark theme
                         } else {
-                            Color.White // White arrow on dark green in light theme
+                            // Black or white depending on theme
+                            if (colorScheme.background == Color.Black) Color.Black else Color.White
                         }
                     )
                 }

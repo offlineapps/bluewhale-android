@@ -38,7 +38,7 @@ fun ChatUserSheet(
     // iOS system colors (matches LocationChannelsSheet exactly)
     val colorScheme = MaterialTheme.colorScheme
     val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
-    val standardGreen = if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D) // iOS green
+    val standardPrimary = colorScheme.primary // Dynamic primary
     val standardBlue = Color(0xFF007AFF) // iOS blue
     val standardRed = Color(0xFFFF3B30) // iOS red
     val standardGrey = if (isDark) Color(0xFF8E8E93) else Color(0xFF6D6D70) // iOS grey
@@ -111,7 +111,7 @@ fun ChatUserSheet(
                             UserActionRow(
                                 title = stringResource(R.string.action_hug_title, targetNickname),
                                 subtitle = stringResource(R.string.action_hug_subtitle),
-                                titleColor = standardGreen,
+                                titleColor = standardPrimary,
                                 onClick = {
                                     // Send hug command
                                     viewModel.sendMessage("/hug $targetNickname")
