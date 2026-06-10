@@ -52,6 +52,9 @@ class BitchatApplication : Application() {
         // Initialize mesh service preferences
         try { com.bitchat.android.service.MeshServicePreferences.init(this) } catch (_: Exception) { }
 
+        // Initialize SMS gateway preferences so saved settings survive app restarts
+        try { com.bitchat.android.smsgateway.SmsGatewayPreferenceManager.init(this) } catch (_: Exception) { }
+
         // Proactively start the foreground service to keep mesh alive
         try { com.bitchat.android.service.MeshForegroundService.start(this) } catch (_: Exception) { }
 
