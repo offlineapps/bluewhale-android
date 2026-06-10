@@ -1,0 +1,4 @@
+First release of bluewhale.
+- Selectable accent color (defaults to Light Blue)
+- SMS webhook gateway with optional Nostr discovery
+- FragmentManager memory hardening
