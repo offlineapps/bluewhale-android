@@ -1,7 +1,10 @@
 package com.bluewhale.android.ui
 
+import com.bluewhale.android.ai.LlmEngine
 import com.bluewhale.android.mesh.BluetoothMeshService
 import com.bluewhale.android.model.BluewhaleMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import java.util.Date
 
 /**
@@ -11,11 +14,14 @@ class CommandProcessor(
     private val state: ChatState,
     private val messageManager: MessageManager,
     private val channelManager: ChannelManager,
-    private val privateChatManager: PrivateChatManager
+    private val privateChatManager: PrivateChatManager,
+    private val llmEngine: LlmEngine?,
+    private val coroutineScope: CoroutineScope
 ) {
-    
+
     // Available commands list
     private val baseCommands = listOf(
+        CommandSuggestion("/ai", emptyList(), "<prompt>", "ask the offline ai model"),
         CommandSuggestion("/block", emptyList(), "[nickname]", "block or list blocked peers"),
         CommandSuggestion("/channels", emptyList(), null, "show all discovered channels"),
         CommandSuggestion("/clear", emptyList(), null, "clear chat messages"),
@@ -35,6 +41,7 @@ class CommandProcessor(
         val parts = command.split(" ")
         val cmd = parts.first().lowercase()
         when (cmd) {
+            "/ai" -> handleAiCommand(parts)
             "/j", "/join" -> handleJoinCommand(parts, myPeerID)
             "/m", "/msg" -> handleMessageCommand(parts, meshService)
             "/w" -> handleWhoCommand(meshService, viewModel)
@@ -357,6 +364,49 @@ class CommandProcessor(
         messageManager.addMessage(systemMessage)
     }
     
+    private fun handleAiCommand(parts: List<String>) {
+        val prompt = parts.drop(1).joinToString(" ").trim()
+        if (prompt.isEmpty()) {
+            postSystemMessage("usage: /ai <prompt>")
+            return
+        }
+
+        if (llmEngine == null || !llmEngine.isModelInstalled()) {
+            val path = llmEngine?.modelPath ?: "the model directory"
+            postSystemMessage("no offline model installed. copy a mediapipe .task model to $path")
+            return
+        }
+
+        postSystemMessage("ai: thinking…")
+        coroutineScope.launch {
+            val result = try {
+                val reply = llmEngine.complete(prompt)
+                if (reply.isBlank()) "ai returned an empty response." else "ai: $reply"
+            } catch (e: Exception) {
+                "ai failed: ${e.message ?: e::class.java.simpleName}"
+            }
+            postSystemMessage(result)
+        }
+    }
+
+    /** Posts a local-only system message into whatever conversation is on screen. */
+    private fun postSystemMessage(content: String) {
+        val message = BluewhaleMessage(
+            sender = "system",
+            content = content,
+            timestamp = Date(),
+            isRelay = false
+        )
+
+        val privatePeer = state.getSelectedPrivateChatPeerValue()
+        val channel = state.getCurrentChannelValue()
+        when {
+            privatePeer != null -> messageManager.addPrivateMessage(privatePeer, message)
+            channel != null -> channelManager.addChannelMessage(channel, message, null)
+            else -> messageManager.addMessage(message)
+        }
+    }
+
     private fun handleUnknownCommand(cmd: String) {
         val systemMessage = BluewhaleMessage(
             sender = "system",

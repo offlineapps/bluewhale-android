@@ -47,7 +47,9 @@ class CommandProcessorTest() {
         messageManager = messageManager,
         dataManager = DataManager(context = context),
         noiseSessionDelegate = mock<NoiseSessionDelegate>()
-      )
+      ),
+      llmEngine = null,
+      coroutineScope = testScope
     )
   }
 
