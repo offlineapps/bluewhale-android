@@ -42,6 +42,9 @@ tor-android-binary = "0.4.4.6"
 # Google Play Services
 gms-location = "21.3.0"
 
+# On-device LLM inference
+mediapipe-tasks-genai = "0.10.35"
+
 # Security
 security-crypto = "1.1.0-beta01"
 
@@ -110,6 +113,9 @@ tor-android-binary = { module = "org.torproject:tor-android-binary", version.ref
 
 # Google Play Services
 gms-location = { module = "com.google.android.gms:play-services-location", version.ref = "gms-location" }
+
+# On-device LLM inference
+mediapipe-tasks-genai = { module = "com.google.mediapipe:tasks-genai", version.ref = "mediapipe-tasks-genai" }
 
 # Security
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "security-crypto" }

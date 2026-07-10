@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.bluewhale.android.ai.MediaPipeLlmEngine
 import com.bluewhale.android.favorites.FavoritesPersistenceService
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -99,7 +100,8 @@ class ChatViewModel(
     }
 
     val privateChatManager = PrivateChatManager(state, messageManager, dataManager, noiseSessionDelegate)
-    private val commandProcessor = CommandProcessor(state, messageManager, channelManager, privateChatManager)
+    private val llmEngine = MediaPipeLlmEngine(application.applicationContext)
+    private val commandProcessor = CommandProcessor(state, messageManager, channelManager, privateChatManager, llmEngine, viewModelScope)
     private val notificationManager = NotificationManager(
       application.applicationContext,
       NotificationManagerCompat.from(application.applicationContext),
@@ -310,6 +312,7 @@ class ChatViewModel(
     override fun onCleared() {
         super.onCleared()
         // Note: Mesh service lifecycle is now managed by MainActivity
+        llmEngine.close()
     }
     
     // MARK: - Nickname Management

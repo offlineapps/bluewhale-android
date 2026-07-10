@@ -165,6 +165,9 @@ dependencies {
     // Google Play Services Location
     implementation(libs.gms.location)
 
+    // On-device LLM inference for the /ai command
+    implementation(libs.mediapipe.tasks.genai)
+
     // Security preferences
     implementation(libs.androidx.security.crypto)
     
