@@ -47,20 +47,8 @@ llama.cpp. A GGUF downloaded from `ollama.com` will not load.
 
 ## Why MediaPipe and not llama.cpp
 
-llama.cpp reads GGUF directly and would match the model links people usually reach for, but it
-publishes no Android Maven artifact — using it means vendoring the sources and building them
-with the NDK as part of this repo's build. MediaPipe ships a prebuilt AAR that Gradle resolves
-like any other dependency, so the runtime costs a one-line dependency instead of an NDK
-toolchain. The tradeoff is the model format.
-
-## Behaviour
-
-- The model loads lazily on the first `/ai` call and is kept in memory afterwards.
-- Concurrent `/ai` calls are serialised; MediaPipe rejects overlapping generation on one instance.
-- Generation runs off the main thread. The chat shows `ai: thinking…` while it works.
-- The model is released in `ChatViewModel.onCleared()`.
-
-## Cost
-
-The MediaPipe native libraries add roughly 26 MB to an arm64 APK, and about 19 MB for
-armeabi-v7a. That cost is paid whether or not a model is installed.
+llama.cpp reads GGUF directly, which is what most model links point at, but it publishes no
+Android Maven artifact — using it means vendoring the sources and building them with the NDK.
+MediaPipe ships a prebuilt AAR that Gradle resolves like any other dependency. The tradeoff is
+the model format, and 26 MB of native libraries in an arm64 APK whether or not a model is
+installed.
