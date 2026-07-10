@@ -1,9 +1,24 @@
 # Offline AI (`/ai`)
 
-`/ai <prompt>` runs a language model on the device and prints the reply into the current
-conversation. Nothing leaves the phone: the reply is a local system message, it is not relayed
-over the mesh and it is not sent to any peer. If you want to share an answer, copy it into a
-normal message yourself.
+`/ai <prompt>` runs a language model on the device and sends the reply to the conversation you
+have open, the same way `/hug` and `/slap` send their messages. In a channel everyone sees the
+answer; in a private chat the other person sees it.
+
+Inference happens on your phone. The prompt is never uploaded anywhere, but the answer **is**
+transmitted to your peers, so do not type anything into `/ai` that you would not type into the
+chat itself.
+
+Replies are prefixed with `[ai]` and quote the prompt that produced them:
+
+```
+[ai] "what is a spring tide": A spring tide occurs at new and full moon, when...
+```
+
+The marker matters. The message is sent under your nickname, so without it peers could not tell
+a model's guess from something you wrote and vouched for.
+
+Only successful answers are transmitted. The `ai: thinking…` progress line, inference failures,
+usage errors and empty responses stay on your device.
 
 ## Installing a model
 

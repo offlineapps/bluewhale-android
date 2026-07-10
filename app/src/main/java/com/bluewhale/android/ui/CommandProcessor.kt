@@ -41,7 +41,7 @@ class CommandProcessor(
         val parts = command.split(" ")
         val cmd = parts.first().lowercase()
         when (cmd) {
-            "/ai" -> handleAiCommand(parts)
+            "/ai" -> handleAiCommand(parts, meshService, myPeerID, onSendMessage)
             "/j", "/join" -> handleJoinCommand(parts, myPeerID)
             "/m", "/msg" -> handleMessageCommand(parts, meshService)
             "/w" -> handleWhoCommand(meshService, viewModel)
@@ -298,44 +298,7 @@ class CommandProcessor(
         if (parts.size > 1) {
             val targetName = parts[1].removePrefix("@")
             val actionMessage = "* ${state.getNicknameValue() ?: "someone"} $verb $targetName $object_ *"
-
-            // If we're in a geohash location channel, don't add a local echo here.
-            // GeohashViewModel.sendGeohashMessage() will add the local echo with proper metadata.
-            val isInLocationChannel = state.selectedLocationChannel.value is com.bluewhale.android.geohash.ChannelID.Location
-
-            // Send as regular message
-            if (state.getSelectedPrivateChatPeerValue() != null) {
-                val peerID = state.getSelectedPrivateChatPeerValue()!!
-                privateChatManager.sendPrivateMessage(
-                    actionMessage,
-                    peerID,
-                    getPeerNickname(peerID, meshService),
-                    state.getNicknameValue(),
-                    myPeerID
-                ) { content, peerIdParam, recipientNicknameParam, messageId ->
-                    sendPrivateMessageVia(meshService, content, peerIdParam, recipientNicknameParam, messageId)
-                }
-            } else if (isInLocationChannel) {
-                // Let the transport layer add the echo; just send it out
-                onSendMessage(actionMessage, emptyList(), null)
-            } else {
-                val message = BluewhaleMessage(
-                    sender = state.getNicknameValue() ?: myPeerID,
-                    content = actionMessage,
-                    timestamp = Date(),
-                    isRelay = false,
-                    senderPeerID = myPeerID,
-                    channel = state.getCurrentChannelValue()
-                )
-                
-                if (state.getCurrentChannelValue() != null) {
-                    channelManager.addChannelMessage(state.getCurrentChannelValue()!!, message, myPeerID)
-                    onSendMessage(actionMessage, emptyList(), state.getCurrentChannelValue())
-                } else {
-                    messageManager.addMessage(message)
-                    onSendMessage(actionMessage, emptyList(), null)
-                }
-            }
+            sendAsSelf(actionMessage, meshService, myPeerID, onSendMessage)
         } else {
             val systemMessage = BluewhaleMessage(
                 sender = "system",
@@ -364,7 +327,12 @@ class CommandProcessor(
         messageManager.addMessage(systemMessage)
     }
     
-    private fun handleAiCommand(parts: List<String>) {
+    private fun handleAiCommand(
+        parts: List<String>,
+        meshService: BluetoothMeshService,
+        myPeerID: String,
+        onSendMessage: (String, List<String>, String?) -> Unit
+    ) {
         val prompt = parts.drop(1).joinToString(" ").trim()
         if (prompt.isEmpty()) {
             postSystemMessage("usage: /ai <prompt>")
@@ -377,15 +345,70 @@ class CommandProcessor(
             return
         }
 
+        // Progress and failures stay on this device; only a successful answer is sent to peers.
         postSystemMessage("ai: thinking…")
         coroutineScope.launch {
-            val result = try {
-                val reply = llmEngine.complete(prompt)
-                if (reply.isBlank()) "ai returned an empty response." else "ai: $reply"
+            val reply = try {
+                llmEngine.complete(prompt)
             } catch (e: Exception) {
-                "ai failed: ${e.message ?: e::class.java.simpleName}"
+                postSystemMessage("ai failed: ${e.message ?: e::class.java.simpleName}")
+                return@launch
             }
-            postSystemMessage(result)
+
+            if (reply.isBlank()) {
+                postSystemMessage("ai returned an empty response.")
+                return@launch
+            }
+
+            sendAsSelf(formatAiMessage(prompt, reply), meshService, myPeerID, onSendMessage)
+        }
+    }
+
+    /** Peers cannot tell generated text from typed text, so mark it. */
+    private fun formatAiMessage(prompt: String, reply: String): String = "[ai] \"$prompt\": $reply"
+
+    /** Sends content to the open conversation as if the user had typed it. */
+    private fun sendAsSelf(
+        content: String,
+        meshService: BluetoothMeshService,
+        myPeerID: String,
+        onSendMessage: (String, List<String>, String?) -> Unit
+    ) {
+        // If we're in a geohash location channel, don't add a local echo here.
+        // GeohashViewModel.sendGeohashMessage() will add the local echo with proper metadata.
+        val isInLocationChannel = state.selectedLocationChannel.value is com.bluewhale.android.geohash.ChannelID.Location
+
+        if (state.getSelectedPrivateChatPeerValue() != null) {
+            val peerID = state.getSelectedPrivateChatPeerValue()!!
+            privateChatManager.sendPrivateMessage(
+                content,
+                peerID,
+                getPeerNickname(peerID, meshService),
+                state.getNicknameValue(),
+                myPeerID
+            ) { messageContent, peerIdParam, recipientNicknameParam, messageId ->
+                sendPrivateMessageVia(meshService, messageContent, peerIdParam, recipientNicknameParam, messageId)
+            }
+        } else if (isInLocationChannel) {
+            // Let the transport layer add the echo; just send it out
+            onSendMessage(content, emptyList(), null)
+        } else {
+            val message = BluewhaleMessage(
+                sender = state.getNicknameValue() ?: myPeerID,
+                content = content,
+                timestamp = Date(),
+                isRelay = false,
+                senderPeerID = myPeerID,
+                channel = state.getCurrentChannelValue()
+            )
+
+            if (state.getCurrentChannelValue() != null) {
+                channelManager.addChannelMessage(state.getCurrentChannelValue()!!, message, myPeerID)
+                onSendMessage(content, emptyList(), state.getCurrentChannelValue())
+            } else {
+                messageManager.addMessage(message)
+                onSendMessage(content, emptyList(), null)
+            }
         }
     }
 

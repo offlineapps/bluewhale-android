@@ -61,25 +61,42 @@ class AiCommandTest {
         coroutineScope = testScope
     )
 
+    /** Content passed to onSendMessage, i.e. what would actually go out over the mesh. */
+    private val sent = mutableListOf<String>()
+
     private fun run(processor: CommandProcessor, command: String): Boolean =
         processor.processCommand(
             command = command,
             meshService = meshService,
             myPeerID = "peer-id",
-            onSendMessage = { _, _, _ -> },
+            onSendMessage = { content, _, _ -> sent.add(content) },
             viewModel = null
         )
 
     private fun messageContents(): List<String> = chatState.getMessagesValue().map { it.content }
 
     @Test
-    fun `ai command with a prompt posts the model reply`() {
+    fun `ai command sends the reply to the conversation`() {
         val engine = FakeLlmEngine(reply = "42")
         val handled = run(processorWith(engine), "/ai what is six times seven")
 
         assertTrue(handled)
         assertEquals("what is six times seven", engine.receivedPrompt)
-        assertTrue(messageContents().contains("ai: 42"))
+        assertEquals(listOf("[ai] \"what is six times seven\": 42"), sent)
+    }
+
+    @Test
+    fun `sent reply is marked as machine generated`() {
+        run(processorWith(FakeLlmEngine(reply = "42")), "/ai hello")
+
+        assertTrue(sent.single().startsWith("[ai] "))
+    }
+
+    @Test
+    fun `ai command echoes the reply locally as well as sending it`() {
+        run(processorWith(FakeLlmEngine(reply = "42")), "/ai hello")
+
+        assertTrue(messageContents().contains("[ai] \"hello\": 42"))
     }
 
     @Test
@@ -124,6 +141,30 @@ class AiCommandTest {
         run(processorWith(engine), "/ai hello")
 
         assertEquals(listOf("ai: thinking…", "ai failed: out of memory"), messageContents())
+    }
+
+    @Test
+    fun `inference failures are never sent to peers`() {
+        val engine = FakeLlmEngine(failure = IllegalStateException("out of memory"))
+        run(processorWith(engine), "/ai hello")
+
+        assertEquals(emptyList<String>(), sent)
+    }
+
+    @Test
+    fun `progress and usage messages are never sent to peers`() {
+        run(processorWith(FakeLlmEngine(installed = false)), "/ai hello")
+        run(processorWith(FakeLlmEngine()), "/ai")
+
+        assertEquals(emptyList<String>(), sent)
+        assertTrue(messageContents().any { it.startsWith("no offline model installed") })
+    }
+
+    @Test
+    fun `empty responses are never sent to peers`() {
+        run(processorWith(FakeLlmEngine(reply = "   ")), "/ai hello")
+
+        assertEquals(emptyList<String>(), sent)
     }
 
     @Test
