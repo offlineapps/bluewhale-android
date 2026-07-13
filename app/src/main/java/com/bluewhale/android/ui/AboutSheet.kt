@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Warning
@@ -28,8 +29,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bluewhale.android.nostr.NostrProofOfWork
 import com.bluewhale.android.nostr.PoWPreferenceManager
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.bluewhale.android.R
+import com.bluewhale.android.mesh.MeshRangePreferenceManager
+import com.bluewhale.android.util.AppConstants
 import com.bluewhale.android.core.ui.component.button.CloseButton
 import com.bluewhale.android.core.ui.component.sheet.BluewhaleBottomSheet
 import com.bluewhale.android.net.TorMode
@@ -670,6 +674,95 @@ fun AboutSheet(
                                     color = colorScheme.onBackground.copy(alpha = 0.5f),
                                     modifier = Modifier.padding(start = 16.dp, top = 8.dp)
                                 )
+                            }
+                        }
+                    }
+
+                    // Mesh Range Section
+                    item(key = "mesh_range") {
+                        LaunchedEffect(Unit) { MeshRangePreferenceManager.init(context) }
+                        val rangeHops by MeshRangePreferenceManager.rangeHops.collectAsState()
+
+                        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                            Text(
+                                text = stringResource(R.string.about_mesh_range).uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colorScheme.onBackground.copy(alpha = 0.5f),
+                                letterSpacing = 0.5.sp,
+                                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                            )
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = colorScheme.surface,
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Hub,
+                                                contentDescription = null,
+                                                tint = colorScheme.primary,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+
+                                            Spacer(modifier = Modifier.width(14.dp))
+
+                                            Text(
+                                                text = stringResource(R.string.about_mesh_range_title),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                color = colorScheme.onSurface
+                                            )
+                                        }
+                                        Text(
+                                            text = pluralStringResource(
+                                                R.plurals.about_mesh_range_hops,
+                                                rangeHops,
+                                                rangeHops
+                                            ),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
+                                    }
+
+                                    Slider(
+                                        value = rangeHops.toFloat(),
+                                        onValueChange = { MeshRangePreferenceManager.setRangeHops(it.toInt()) },
+                                        valueRange = AppConstants.MIN_RANGE_HOPS.toFloat()..AppConstants.MAX_RANGE_HOPS.toFloat(),
+                                        steps = AppConstants.MAX_RANGE_HOPS - AppConstants.MIN_RANGE_HOPS - 1,
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = colorScheme.primary,
+                                            activeTrackColor = colorScheme.primary
+                                        )
+                                    )
+
+                                    Text(
+                                        text = if (rangeHops == AppConstants.MIN_RANGE_HOPS) {
+                                            stringResource(R.string.about_mesh_range_desc_direct)
+                                        } else {
+                                            stringResource(R.string.about_mesh_range_desc_hops, rangeHops)
+                                        },
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = colorScheme.onSurface.copy(alpha = 0.5f)
+                                    )
+
+                                    Text(
+                                        text = stringResource(R.string.about_mesh_range_relay_note),
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = colorScheme.onSurface.copy(alpha = 0.5f)
+                                    )
+                                }
                             }
                         }
                     }
