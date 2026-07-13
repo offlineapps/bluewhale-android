@@ -632,7 +632,9 @@ class BluetoothMeshService(private val context: Context) {
         }
         
         Log.i(TAG, "Starting Bluetooth mesh service with peer ID: $myPeerID")
-        
+
+        MeshRangePreferenceManager.init(context)
+
         if (connectionManager.startServices()) {
             isActive = true
             
@@ -1058,13 +1060,15 @@ class BluetoothMeshService(private val context: Context) {
                 } catch (_: Exception) { }
             } catch (_: Exception) { }
             
-            val announcePacket = BluewhalePacket(
-                type = MessageType.ANNOUNCE.value,
-                ttl = MAX_TTL,
-                senderID = myPeerID,
-                payload = tlvPayload
+            val announcePacket = applyMeshRange(
+                BluewhalePacket(
+                    type = MessageType.ANNOUNCE.value,
+                    ttl = MAX_TTL,
+                    senderID = myPeerID,
+                    payload = tlvPayload
+                )
             )
-            
+
             // Sign the packet using our signing key (exactly like iOS)
             val signedPacket = encryptionService.signData(announcePacket.toBinaryDataForSigning()!!)?.let { signature ->
                 announcePacket.copy(signature = signature)
@@ -1121,13 +1125,15 @@ class BluetoothMeshService(private val context: Context) {
             } catch (_: Exception) { }
         } catch (_: Exception) { }
         
-        val packet = BluewhalePacket(
-            type = MessageType.ANNOUNCE.value,
-            ttl = MAX_TTL,
-            senderID = myPeerID,
-            payload = tlvPayload
+        val packet = applyMeshRange(
+            BluewhalePacket(
+                type = MessageType.ANNOUNCE.value,
+                ttl = MAX_TTL,
+                senderID = myPeerID,
+                payload = tlvPayload
+            )
         )
-        
+
         // Sign the packet using our signing key (exactly like iOS)
         val signedPacket = encryptionService.signData(packet.toBinaryDataForSigning()!!)?.let { signature ->
             packet.copy(signature = signature)
@@ -1333,9 +1339,21 @@ class BluetoothMeshService(private val context: Context) {
     }
     
     /**
+     * Limit a packet we originate to the mesh range the user picked.
+     *
+     * Only called for packets we create ourselves. Packets we relay for other peers keep
+     * the TTL their sender chose, so a short range never truncates anyone else's reach.
+     */
+    private fun applyMeshRange(packet: BluewhalePacket): BluewhalePacket {
+        val limited = MeshRangePreferenceManager.limitTtl(packet.ttl)
+        return if (limited == packet.ttl) packet else packet.copy(ttl = limited)
+    }
+
+    /**
      * Sign packet before broadcasting using our signing private key
      */
-    private fun signPacketBeforeBroadcast(packet: BluewhalePacket): BluewhalePacket {
+    private fun signPacketBeforeBroadcast(originated: BluewhalePacket): BluewhalePacket {
+        val packet = applyMeshRange(originated)
         return try {
             // Optionally compute and attach a source route for addressed packets
             val withRoute = try {
