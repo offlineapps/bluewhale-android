@@ -128,6 +128,15 @@
   <string name="about_pow_desc_high">high - strong spam protection</string>
   <string name="about_pow_desc_very_high">very high - may cause delays</string>
   <string name="about_pow_desc_extreme">extreme - significant computation required</string>
+  <string name="about_mesh_range">mesh range</string>
+  <string name="about_mesh_range_title">message range</string>
+  <plurals name="about_mesh_range_hops">
+    <item quantity="one">%d hop</item>
+    <item quantity="other">%d hops</item>
+  </plurals>
+  <string name="about_mesh_range_desc_direct">only devices in direct bluetooth range receive what you send, including your presence.</string>
+  <string name="about_mesh_range_desc_hops">what you send stops %1$d hops away, including your presence. devices further away never see it.</string>
+  <string name="about_mesh_range_relay_note">you keep relaying other people\'s messages at the range they chose.</string>
   <string name="about_network">network</string>
   <string name="about_tor_off">tor off</string>
   <string name="about_tor_on">tor on</string>
