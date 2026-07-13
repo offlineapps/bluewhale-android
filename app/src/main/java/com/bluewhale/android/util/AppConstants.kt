@@ -10,6 +10,11 @@ object AppConstants {
     val MESSAGE_TTL_HOPS: UByte = 7u     // Default TTL for regular packets
     val SYNC_TTL_HOPS: UByte = 0u        // TTL for neighbor-only sync packets
 
+    // User selected mesh range. A packet is relayed once per hop and dropped once its
+    // TTL reaches zero, so TTL t is heard by devices up to t + 1 hops away.
+    const val MIN_RANGE_HOPS: Int = 1
+    val MAX_RANGE_HOPS: Int = MESSAGE_TTL_HOPS.toInt() + 1
+
     object Mesh {
         // Peer lifecycle
         const val STALE_PEER_TIMEOUT_MS: Long = 180_000L // 3 minutes
