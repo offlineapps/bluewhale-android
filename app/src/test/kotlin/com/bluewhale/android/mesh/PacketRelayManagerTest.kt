@@ -7,9 +7,11 @@ import com.bluewhale.android.protocol.MessageType
 import com.bluewhale.android.util.toHexString
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import org.mockito.kotlin.any
+import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
@@ -34,14 +36,14 @@ class PacketRelayManagerTest {
         whenever(delegate.getBroadcastRecipient()).thenReturn(byteArrayOf(0,0,0,0,0,0,0,0))
     }
 
-    private fun createPacket(route: List<ByteArray>?, recipient: String? = null): BluewhalePacket {
+    private fun createPacket(route: List<ByteArray>?, recipient: String? = null, ttl: UByte = 5u): BluewhalePacket {
         return BluewhalePacket(
             type = MessageType.MESSAGE.value,
             senderID = hexStringToPeerBytes(otherPeerID),
             recipientID = recipient?.let { hexStringToPeerBytes(it) },
             timestamp = System.currentTimeMillis().toULong(),
             payload = "hello".toByteArray(),
-            ttl = 5u,
+            ttl = ttl,
             route = route
         )
     }
@@ -101,6 +103,43 @@ class PacketRelayManagerTest {
 
         verify(delegate, never()).sendToPeer(any(), any())
         verify(delegate).broadcastPacket(any())
+    }
+
+    @Test
+    fun `packet sent with a range of two hops is relayed once`() = runTest {
+        val packet = createPacket(null, ttl = 1u)
+        val routedPacket = RoutedPacket(packet, otherPeerID)
+        val relayed = argumentCaptor<RoutedPacket>()
+
+        packetRelayManager.handlePacketRelay(routedPacket)
+
+        verify(delegate).broadcastPacket(relayed.capture())
+        assertEquals(0u.toUByte(), relayed.firstValue.packet.ttl)
+    }
+
+    @Test
+    fun `packet that reached the end of its range is not relayed further`() = runTest {
+        val packet = createPacket(null, ttl = 0u)
+        val routedPacket = RoutedPacket(packet, otherPeerID)
+
+        packetRelayManager.handlePacketRelay(routedPacket)
+
+        verify(delegate, never()).broadcastPacket(any())
+        verify(delegate, never()).sendToPeer(any(), any())
+    }
+
+    @Test
+    fun `our own range does not shorten packets we relay for other peers`() = runTest {
+        MeshRangePreferenceManager.resetForTesting()
+        MeshRangePreferenceManager.setRangeHops(1)
+        val packet = createPacket(null, ttl = 5u)
+        val routedPacket = RoutedPacket(packet, otherPeerID)
+        val relayed = argumentCaptor<RoutedPacket>()
+
+        packetRelayManager.handlePacketRelay(routedPacket)
+
+        verify(delegate).broadcastPacket(relayed.capture())
+        assertEquals(4u.toUByte(), relayed.firstValue.packet.ttl)
     }
 
     private fun hexStringToPeerBytes(hex: String): ByteArray {
