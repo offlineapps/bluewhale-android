@@ -681,7 +681,10 @@ fun AboutSheet(
                     // Mesh Range Section
                     item(key = "mesh_range") {
                         LaunchedEffect(Unit) { MeshRangePreferenceManager.init(context) }
-                        val rangeHops by MeshRangePreferenceManager.rangeHops.collectAsState()
+                        val savedRangeHops by MeshRangePreferenceManager.rangeHops.collectAsState()
+                        // Track the thumb locally while dragging; persist once on release
+                        var draftRangeHops by remember { mutableStateOf<Int?>(null) }
+                        val rangeHops = draftRangeHops ?: savedRangeHops
 
                         Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                             Text(
@@ -736,7 +739,11 @@ fun AboutSheet(
 
                                     Slider(
                                         value = rangeHops.toFloat(),
-                                        onValueChange = { MeshRangePreferenceManager.setRangeHops(it.toInt()) },
+                                        onValueChange = { draftRangeHops = it.toInt() },
+                                        onValueChangeFinished = {
+                                            draftRangeHops?.let { MeshRangePreferenceManager.setRangeHops(it) }
+                                            draftRangeHops = null
+                                        },
                                         valueRange = AppConstants.MIN_RANGE_HOPS.toFloat()..AppConstants.MAX_RANGE_HOPS.toFloat(),
                                         steps = AppConstants.MAX_RANGE_HOPS - AppConstants.MIN_RANGE_HOPS - 1,
                                         colors = SliderDefaults.colors(
