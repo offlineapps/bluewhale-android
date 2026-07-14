@@ -19,7 +19,10 @@ import com.bluewhale.android.mesh.BluetoothMeshService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import com.bluewhale.android.services.AppStateStore
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -28,6 +31,9 @@ class MeshForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "bluewhale_mesh_service"
         private const val NOTIFICATION_ID = 10001
+
+        // Refresh tick only re-posts when the peer count actually changed
+        private const val NOTIFICATION_REFRESH_INTERVAL_MS = 30_000L
 
         const val ACTION_START = "com.bluewhale.android.service.START"
         const val ACTION_STOP = "com.bluewhale.android.service.STOP"
@@ -113,12 +119,14 @@ class MeshForegroundService : Service() {
 
     private lateinit var notificationManager: NotificationManagerCompat
     private var updateJob: Job? = null
+    private var peersJob: Job? = null
     private val meshService: BluetoothMeshService?
         get() = MeshServiceHolder.meshService
     private val serviceJob = Job()
     private val scope = CoroutineScope(Dispatchers.Default + serviceJob)
     private var isInForeground: Boolean = false
     private var isShuttingDown: Boolean = false
+    private val notificationContent = NotificationContentTracker()
 
     override fun onCreate() {
         super.onCreate()
@@ -150,6 +158,7 @@ class MeshForegroundService : Service() {
                 try { meshService?.stopServices() } catch (_: Exception) { }
                 try { MeshServiceHolder.clear() } catch (_: Exception) { }
                 try { stopForeground(true) } catch (_: Exception) { }
+                notificationContent.reset()
                 notificationManager.cancel(NOTIFICATION_ID)
                 isInForeground = false
                 stopSelf()
@@ -159,7 +168,10 @@ class MeshForegroundService : Service() {
                 isShuttingDown = true
                 updateJob?.cancel()
                 updateJob = null
+                peersJob?.cancel()
+                peersJob = null
                 try { stopForeground(true) } catch (_: Exception) { }
+                notificationContent.reset()
                 notificationManager.cancel(NOTIFICATION_ID)
                 isInForeground = false
                 // Fully stop all background activity, stop Tor (without changing setting), then kill the app
@@ -178,9 +190,7 @@ class MeshForegroundService : Service() {
             ACTION_UPDATE_NOTIFICATION -> {
                 // If we became eligible and are not in foreground yet, promote once
                 if (MeshServicePreferences.isBackgroundEnabled(true) && hasAllRequiredPermissions() && !isInForeground) {
-                    val n = buildNotification(meshService?.getActivePeerCount() ?: 0)
-                    startForegroundCompat(n)
-                    isInForeground = true
+                    promoteToForeground()
                 } else {
                     updateNotification(force = true)
                 }
@@ -193,12 +203,20 @@ class MeshForegroundService : Service() {
 
         // Promote exactly once when eligible, otherwise stay background (or stop)
         if (MeshServicePreferences.isBackgroundEnabled(true) && hasAllRequiredPermissions() && !isInForeground) {
-            val notification = buildNotification(meshService?.getActivePeerCount() ?: 0)
-            startForegroundCompat(notification)
-            isInForeground = true
+            promoteToForeground()
         }
 
-        // Periodically refresh the notification with live network size
+        // Refresh the notification as soon as the peer count actually changes
+        if (peersJob == null) {
+            peersJob = scope.launch {
+                AppStateStore.peers
+                    .map { it.size }
+                    .distinctUntilChanged()
+                    .collect { updateNotification(force = false) }
+            }
+        }
+
+        // Slow safety net: retry mesh/foreground promotion and correct any drift
         if (updateJob == null) {
             updateJob = scope.launch {
                 while (isActive) {
@@ -214,9 +232,10 @@ class MeshForegroundService : Service() {
                             try { stopForeground(false) } catch (_: Exception) { }
                             isInForeground = false
                         }
+                        notificationContent.reset()
                         notificationManager.cancel(NOTIFICATION_ID)
                     }
-                    delay(5000)
+                    delay(NOTIFICATION_REFRESH_INTERVAL_MS)
                 }
             }
         }
@@ -236,18 +255,27 @@ class MeshForegroundService : Service() {
         }
     }
 
+    private fun promoteToForeground() {
+        val count = meshService?.getActivePeerCount() ?: 0
+        notificationContent.shouldPost(count, force = true)
+        startForegroundCompat(buildNotification(count))
+        isInForeground = true
+    }
+
     private fun updateNotification(force: Boolean) {
         if (isShuttingDown) {
+            notificationContent.reset()
             notificationManager.cancel(NOTIFICATION_ID)
             return
         }
         val count = meshService?.getActivePeerCount() ?: 0
-        val notification = buildNotification(count)
         if (MeshServicePreferences.isBackgroundEnabled(true) && hasAllRequiredPermissions()) {
-            notificationManager.notify(NOTIFICATION_ID, notification)
+            if (!notificationContent.shouldPost(count, force)) return
+            notificationManager.notify(NOTIFICATION_ID, buildNotification(count))
         } else if (force) {
             // If disabled and forced, make sure to remove any prior foreground state
             try { stopForeground(false) } catch (_: Exception) { }
+            notificationContent.reset()
             notificationManager.cancel(NOTIFICATION_ID)
             isInForeground = false
         }
@@ -362,6 +390,8 @@ class MeshForegroundService : Service() {
     override fun onDestroy() {
         updateJob?.cancel()
         updateJob = null
+        peersJob?.cancel()
+        peersJob = null
         // Cancel the service coroutine scope to prevent leaks
         try { serviceJob.cancel() } catch (_: Exception) { }
         // Best-effort ensure we are not marked foreground
