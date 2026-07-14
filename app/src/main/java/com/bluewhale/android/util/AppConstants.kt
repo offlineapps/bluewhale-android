@@ -124,10 +124,11 @@ object AppConstants {
         const val PRESENCE_FOREGROUND_MIN_INTERVAL_MS: Long = 40_000L
         const val PRESENCE_FOREGROUND_MAX_INTERVAL_MS: Long = 80_000L
 
-        // Backgrounded. Stays under the 5 minute participant prune window in
-        // GeohashRepository so a backgrounded user keeps appearing in the lists.
-        const val PRESENCE_BACKGROUND_MIN_INTERVAL_MS: Long = 210_000L
-        const val PRESENCE_BACKGROUND_MAX_INTERVAL_MS: Long = 270_000L
+        // Backgrounded. Two of these must fit inside the 5 minute participant
+        // prune window in GeohashRepository, so a single dropped or Doze deferred
+        // publish cannot make the user vanish from other clients' lists.
+        const val PRESENCE_BACKGROUND_MIN_INTERVAL_MS: Long = 120_000L
+        const val PRESENCE_BACKGROUND_MAX_INTERVAL_MS: Long = 144_000L
 
         // Backgrounded with reduced background activity opted in. Deliberately
         // past the prune window: the user drops out of the lists while away.
