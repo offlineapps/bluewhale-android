@@ -7,6 +7,7 @@ import com.bluewhale.android.mesh.BluetoothMeshService
 import junit.framework.TestCase.assertEquals
 import junit.framework.TestCase.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.Test
@@ -24,6 +25,15 @@ class AiCommandTest {
     private val chatState = ChatState(scope = testScope)
     private val messageManager = MessageManager(state = chatState)
     private val meshService: BluetoothMeshService = mock()
+
+    /** Completes only when the test releases it, so the test can act mid-generation. */
+    private class GatedLlmEngine : LlmEngine {
+        val gate = CompletableDeferred<String>()
+        override val modelPath = "/data/models/model.task"
+        override fun isModelInstalled() = true
+        override suspend fun complete(prompt: String): String = gate.await()
+        override fun close() {}
+    }
 
     private class FakeLlmEngine(
         private val installed: Boolean = true,
@@ -181,6 +191,45 @@ class AiCommandTest {
         run(processorWith(engine), "/ai summarise the last message for me")
 
         assertEquals("summarise the last message for me", engine.receivedPrompt)
+    }
+
+    @Test
+    fun `reply goes to the conversation the command was typed in, not the one open when it finishes`() {
+        val engine = GatedLlmEngine()
+        run(processorWith(engine), "/ai hello")
+
+        // User opens a private chat with bob while the model is still thinking
+        chatState.setSelectedPrivateChatPeer("bob")
+        engine.gate.complete("late reply")
+
+        assertEquals(listOf("[ai] \"hello\": late reply"), sent)
+        val bobMessages = chatState.getPrivateChatsValue()["bob"].orEmpty().map { it.content }
+        assertTrue(bobMessages.none { it.contains("late reply") })
+    }
+
+    @Test
+    fun `failure lands in the conversation the command was typed in`() {
+        val engine = GatedLlmEngine()
+        run(processorWith(engine), "/ai hello")
+
+        chatState.setSelectedPrivateChatPeer("bob")
+        engine.gate.completeExceptionally(RuntimeException("boom"))
+
+        assertTrue(messageContents().any { it.contains("ai failed: boom") })
+        assertTrue(chatState.getPrivateChatsValue()["bob"].orEmpty().none { it.content.contains("boom") })
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    fun `inference that never returns times out with a local message`() {
+        val engine = GatedLlmEngine()
+        run(processorWith(engine), "/ai hello")
+
+        testScope.testScheduler.advanceTimeBy(181_000)
+        testScope.testScheduler.runCurrent()
+
+        assertTrue(messageContents().any { it.contains("ai timed out") })
+        assertTrue(sent.isEmpty())
     }
 
     @Test
