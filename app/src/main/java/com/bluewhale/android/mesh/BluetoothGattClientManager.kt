@@ -168,7 +168,8 @@ class BluetoothGattClientManager(
                 try {
                     // Request RSSI from all client connections
                     val connectedDevices = connectionTracker.getConnectedDevices()
-                    connectedDevices.values.filter { it.isClient && it.gatt != null }.forEach { deviceConn ->
+                    val clients = connectedDevices.values.filter { it.isClient && it.gatt != null }
+                    clients.forEach { deviceConn ->
                         try {
                             Log.d(TAG, "Requesting RSSI from ${deviceConn.device.address}")
                             deviceConn.gatt?.readRemoteRssi()
@@ -176,7 +177,7 @@ class BluetoothGattClientManager(
                             Log.w(TAG, "Failed to request RSSI from ${deviceConn.device.address}: ${e.message}")
                         }
                     }
-                    delay(AppConstants.Mesh.RSSI_UPDATE_INTERVAL_MS)
+                    delay(RssiPollScheduler.nextDelayMs(clients.size))
                 } catch (e: Exception) {
                     Log.w(TAG, "Error in RSSI monitoring: ${e.message}")
                     delay(AppConstants.Mesh.RSSI_UPDATE_INTERVAL_MS)
@@ -418,6 +419,8 @@ class BluetoothGattClientManager(
                         delay(200) // A small delay can improve reliability of MTU request.
                         gatt.requestMtu(517)
                     }
+                    // Restart the RSSI loop so it leaves its idle backoff immediately
+                    startRSSIMonitoring()
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     if (status != BluetoothGatt.GATT_SUCCESS) {
                         Log.w(TAG, "Client: Disconnected from $deviceAddress with error status $status")

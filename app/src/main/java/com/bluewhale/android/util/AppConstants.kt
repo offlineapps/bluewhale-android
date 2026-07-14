@@ -30,6 +30,9 @@ object AppConstants {
         // GATT client RSSI updates
         const val RSSI_UPDATE_INTERVAL_MS: Long = 5_000L
 
+        // Slower tick used while no client connections exist to poll
+        const val RSSI_IDLE_INTERVAL_MS: Long = 60_000L
+
         object Gatt {
             val SERVICE_UUID: UUID = UUID.fromString("F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C")
             val CHARACTERISTIC_UUID: UUID = UUID.fromString("A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D")
