@@ -117,6 +117,17 @@ object AppConstants {
 
         // Relay subscription validation
         const val SUBSCRIPTION_VALIDATION_INTERVAL_MS: Long = 30_000L
+
+        // Geohash presence heartbeat. Foreground is randomized to decorrelate
+        // clients; background is slowed down so an idle app stops waking the radio
+        // every minute.
+        const val PRESENCE_FOREGROUND_MIN_INTERVAL_MS: Long = 40_000L
+        const val PRESENCE_FOREGROUND_MAX_INTERVAL_MS: Long = 80_000L
+        const val PRESENCE_BACKGROUND_INTERVAL_MS: Long = 900_000L
+
+        // Geohash participant list refresh
+        const val PARTICIPANTS_REFRESH_INTERVAL_MS: Long = 30_000L
+        const val PARTICIPANTS_IDLE_INTERVAL_MS: Long = 300_000L
     }
 
     object Tor {
