@@ -122,8 +122,9 @@ class GeohashViewModel(
                     // Enter heartbeat loop for this set of channels
                     // If channels change (e.g. user moves), collectLatest cancels this loop and starts a new one immediately
                     while (true) {
-                        // Randomize loop interval (40-80s, average 60s)
-                        val loopInterval = kotlin.random.Random.nextLong(40000L, 80000L)
+                        // Randomized in foreground, throttled hard while backgrounded
+                        val loopInterval = com.bluewhale.android.geohash.GeohashCadence
+                            .presenceIntervalMs(isAppInForeground())
                         var timeSpent = 0L
 
                         try {
@@ -378,8 +379,11 @@ class GeohashViewModel(
     private fun startGeoParticipantsTimer() {
         geoTimer = viewModelScope.launch {
             while (repo.getCurrentGeohash() != null) {
-                delay(30000)
-                repo.refreshGeohashPeople()
+                delay(com.bluewhale.android.geohash.GeohashCadence.participantsIntervalMs(isAppInForeground()))
+                // The participant list is only rendered in the foreground
+                if (isAppInForeground()) {
+                    repo.refreshGeohashPeople()
+                }
             }
         }
     }
@@ -394,6 +398,13 @@ class GeohashViewModel(
     override fun onStart(owner: LifecycleOwner) {
         Log.d(TAG, "🌍 App foregrounded: Resuming sampling for ${activeSamplingGeohashes.size} geohashes")
         activeSamplingGeohashes.forEach { performSubscribeSampling(it) }
+
+        // Both loops may be parked on a long background delay; restart them so
+        // presence and the participant list refresh immediately
+        startGlobalPresenceHeartbeat()
+        if (repo.getCurrentGeohash() != null) {
+            viewModelScope.launch { repo.refreshGeohashPeople() }
+        }
     }
 
     override fun onStop(owner: LifecycleOwner) {
