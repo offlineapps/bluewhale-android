@@ -126,6 +126,9 @@ class MeshForegroundService : Service() {
     private val scope = CoroutineScope(Dispatchers.Default + serviceJob)
     private var isInForeground: Boolean = false
     private var isShuttingDown: Boolean = false
+    // Set once startServices() has been reached with permissions in hand, so the
+    // safety-net loop stops re-poking an already running mesh
+    private var meshStartConfirmed: Boolean = false
     private val notificationContent = NotificationContentTracker()
 
     override fun onCreate() {
@@ -148,6 +151,7 @@ class MeshForegroundService : Service() {
         if (isShuttingDown && intent?.action == ACTION_START) {
             AppShutdownCoordinator.cancelPendingShutdown()
             isShuttingDown = false
+            meshStartConfirmed = false
         }
         if (isShuttingDown && intent?.action != ACTION_QUIT) {
             return START_NOT_STICKY
@@ -157,6 +161,7 @@ class MeshForegroundService : Service() {
                 // Stop FGS and mesh cleanly
                 try { meshService?.stopServices() } catch (_: Exception) { }
                 try { MeshServiceHolder.clear() } catch (_: Exception) { }
+                meshStartConfirmed = false
                 try { stopForeground(true) } catch (_: Exception) { }
                 notificationContent.reset()
                 notificationManager.cancel(NOTIFICATION_ID)
@@ -166,6 +171,7 @@ class MeshForegroundService : Service() {
             }
             ACTION_QUIT -> {
                 isShuttingDown = true
+                meshStartConfirmed = false
                 updateJob?.cancel()
                 updateJob = null
                 peersJob?.cancel()
@@ -244,12 +250,13 @@ class MeshForegroundService : Service() {
     }
 
     private fun ensureMeshStarted() {
-        if (isShuttingDown) return
+        if (isShuttingDown || meshStartConfirmed) return
         if (!hasBluetoothPermissions()) return
         try {
             android.util.Log.d("MeshForegroundService", "Ensuring mesh service is started")
             val service = MeshServiceHolder.getOrCreate(applicationContext)
             service.startServices()
+            meshStartConfirmed = true
         } catch (e: Exception) {
             android.util.Log.e("MeshForegroundService", "Failed to start mesh service: ${e.message}")
         }
