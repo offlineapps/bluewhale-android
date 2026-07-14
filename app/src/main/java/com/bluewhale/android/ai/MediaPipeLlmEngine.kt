@@ -30,8 +30,12 @@ class MediaPipeLlmEngine(
 
     // Loading the model costs seconds and hundreds of MB, so it is done once on first use.
     private var inference: LlmInference? = null
-    // MediaPipe rejects overlapping generateResponse calls on one instance.
+    // MediaPipe rejects overlapping generateResponse calls on one instance, and closing
+    // the native handle while a generation is in flight can crash the process. The mutex
+    // serializes generation; close() defers to the generation holding it.
     private val mutex = Mutex()
+    @Volatile
+    private var closed = false
 
     override val modelPath: String
         get() {
@@ -43,8 +47,13 @@ class MediaPipeLlmEngine(
 
     override suspend fun complete(prompt: String): String = withContext(Dispatchers.IO) {
         mutex.withLock {
+            check(!closed) { "engine is closed" }
             val engine = inference ?: load().also { inference = it }
-            engine.generateResponse(prompt).trim()
+            try {
+                engine.generateResponse(prompt).trim()
+            } finally {
+                if (closed) closeLocked()
+            }
         }
     }
 
@@ -61,7 +70,24 @@ class MediaPipeLlmEngine(
     }
 
     override fun close() {
-        inference?.close()
+        closed = true
+        // If a generation is in flight it holds the mutex; it will close the handle
+        // in its finally block instead
+        if (mutex.tryLock()) {
+            try {
+                closeLocked()
+            } finally {
+                mutex.unlock()
+            }
+        }
+    }
+
+    private fun closeLocked() {
+        try {
+            inference?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "error closing inference: ${e.message}")
+        }
         inference = null
     }
 }

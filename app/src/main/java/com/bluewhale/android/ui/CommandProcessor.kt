@@ -4,7 +4,10 @@ import com.bluewhale.android.ai.LlmEngine
 import com.bluewhale.android.mesh.BluetoothMeshService
 import com.bluewhale.android.model.BluewhaleMessage
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import java.util.Date
 
 /**
@@ -18,6 +21,11 @@ class CommandProcessor(
     private val llmEngine: LlmEngine?,
     private val coroutineScope: CoroutineScope
 ) {
+
+    companion object {
+        // Covers first-use model load plus generation on slow devices
+        private const val AI_INFERENCE_TIMEOUT_MS = 180_000L
+    }
 
     // Available commands list
     private val baseCommands = listOf(
@@ -298,7 +306,7 @@ class CommandProcessor(
         if (parts.size > 1) {
             val targetName = parts[1].removePrefix("@")
             val actionMessage = "* ${state.getNicknameValue() ?: "someone"} $verb $targetName $object_ *"
-            sendAsSelf(actionMessage, meshService, myPeerID, onSendMessage)
+            sendAsSelf(actionMessage, captureConversationTarget(), meshService, myPeerID, onSendMessage)
         } else {
             val systemMessage = BluewhaleMessage(
                 sender = "system",
@@ -345,52 +353,73 @@ class CommandProcessor(
             return
         }
 
+        // Inference takes seconds to minutes; the user may open another chat meanwhile.
+        // Everything below must go to the conversation the command was typed into.
+        val target = captureConversationTarget()
+
         // Progress and failures stay on this device; only a successful answer is sent to peers.
-        postSystemMessage("ai: thinking…")
+        postSystemMessage("ai: thinking…", target)
         coroutineScope.launch {
-            val reply = try {
-                llmEngine.complete(prompt)
-            } catch (e: Exception) {
-                postSystemMessage("ai failed: ${e.message ?: e::class.java.simpleName}")
+            // runCatching keeps a failed inference from cancelling the scope while the
+            // deferred is orphaned after a timeout
+            val pending = async { runCatching { llmEngine.complete(prompt) } }
+            val result = try {
+                withTimeout(AI_INFERENCE_TIMEOUT_MS) { pending.await() }
+            } catch (e: TimeoutCancellationException) {
+                postSystemMessage("ai timed out after ${AI_INFERENCE_TIMEOUT_MS / 1000}s.", target)
+                return@launch
+            }
+
+            val reply = result.getOrElse { e ->
+                postSystemMessage("ai failed: ${e.message ?: e::class.java.simpleName}", target)
                 return@launch
             }
 
             if (reply.isBlank()) {
-                postSystemMessage("ai returned an empty response.")
+                postSystemMessage("ai returned an empty response.", target)
                 return@launch
             }
 
-            sendAsSelf(formatAiMessage(prompt, reply), meshService, myPeerID, onSendMessage)
+            sendAsSelf(formatAiMessage(prompt, reply), target, meshService, myPeerID, onSendMessage)
         }
     }
 
     /** Peers cannot tell generated text from typed text, so mark it. */
     private fun formatAiMessage(prompt: String, reply: String): String = "[ai] \"$prompt\": $reply"
 
-    /** Sends content to the open conversation as if the user had typed it. */
+    /** The conversation a command was typed into, captured before any async work. */
+    private data class ConversationTarget(
+        val privatePeer: String?,
+        val channel: String?,
+        val isLocationChannel: Boolean
+    )
+
+    private fun captureConversationTarget() = ConversationTarget(
+        privatePeer = state.getSelectedPrivateChatPeerValue(),
+        channel = state.getCurrentChannelValue(),
+        isLocationChannel = state.selectedLocationChannel.value is com.bluewhale.android.geohash.ChannelID.Location
+    )
+
+    /** Sends content to the captured conversation as if the user had typed it there. */
     private fun sendAsSelf(
         content: String,
+        target: ConversationTarget,
         meshService: BluetoothMeshService,
         myPeerID: String,
         onSendMessage: (String, List<String>, String?) -> Unit
     ) {
-        // If we're in a geohash location channel, don't add a local echo here.
-        // GeohashViewModel.sendGeohashMessage() will add the local echo with proper metadata.
-        val isInLocationChannel = state.selectedLocationChannel.value is com.bluewhale.android.geohash.ChannelID.Location
-
-        if (state.getSelectedPrivateChatPeerValue() != null) {
-            val peerID = state.getSelectedPrivateChatPeerValue()!!
+        if (target.privatePeer != null) {
             privateChatManager.sendPrivateMessage(
                 content,
-                peerID,
-                getPeerNickname(peerID, meshService),
+                target.privatePeer,
+                getPeerNickname(target.privatePeer, meshService),
                 state.getNicknameValue(),
                 myPeerID
             ) { messageContent, peerIdParam, recipientNicknameParam, messageId ->
                 sendPrivateMessageVia(meshService, messageContent, peerIdParam, recipientNicknameParam, messageId)
             }
-        } else if (isInLocationChannel) {
-            // Let the transport layer add the echo; just send it out
+        } else if (target.isLocationChannel) {
+            // No local echo here: GeohashViewModel.sendGeohashMessage() adds it with proper metadata
             onSendMessage(content, emptyList(), null)
         } else {
             val message = BluewhaleMessage(
@@ -399,12 +428,12 @@ class CommandProcessor(
                 timestamp = Date(),
                 isRelay = false,
                 senderPeerID = myPeerID,
-                channel = state.getCurrentChannelValue()
+                channel = target.channel
             )
 
-            if (state.getCurrentChannelValue() != null) {
-                channelManager.addChannelMessage(state.getCurrentChannelValue()!!, message, myPeerID)
-                onSendMessage(content, emptyList(), state.getCurrentChannelValue())
+            if (target.channel != null) {
+                channelManager.addChannelMessage(target.channel, message, myPeerID)
+                onSendMessage(content, emptyList(), target.channel)
             } else {
                 messageManager.addMessage(message)
                 onSendMessage(content, emptyList(), null)
@@ -412,8 +441,8 @@ class CommandProcessor(
         }
     }
 
-    /** Posts a local-only system message into whatever conversation is on screen. */
-    private fun postSystemMessage(content: String) {
+    /** Posts a local-only system message into the captured conversation (default: on-screen one). */
+    private fun postSystemMessage(content: String, target: ConversationTarget = captureConversationTarget()) {
         val message = BluewhaleMessage(
             sender = "system",
             content = content,
@@ -421,11 +450,9 @@ class CommandProcessor(
             isRelay = false
         )
 
-        val privatePeer = state.getSelectedPrivateChatPeerValue()
-        val channel = state.getCurrentChannelValue()
         when {
-            privatePeer != null -> messageManager.addPrivateMessage(privatePeer, message)
-            channel != null -> channelManager.addChannelMessage(channel, message, null)
+            target.privatePeer != null -> messageManager.addPrivateMessage(target.privatePeer, message)
+            target.channel != null -> channelManager.addChannelMessage(target.channel, message, null)
             else -> messageManager.addMessage(message)
         }
     }
