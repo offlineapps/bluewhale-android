@@ -169,6 +169,8 @@
   <string name="notification_action_quit_bluewhale">Quit bluewhale</string>
   <string name="about_background_title">run in background</string>
   <string name="about_background_desc">keep mesh active when app is closed (foreground service)</string>
+  <string name="about_reduce_background_title">reduce background activity</string>
+  <string name="about_reduce_background_desc">save battery by broadcasting presence less often when the app is closed. you will not appear in geohash participant lists until you open the app</string>
   <string name="cd_leave_channel">Leave channel</string>
   <string name="cd_reachable_via_nostr">Reachable via Nostr</string>
   <string name="cd_offline_favorite">Offline favorite</string>

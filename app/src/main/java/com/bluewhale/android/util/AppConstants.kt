@@ -118,12 +118,21 @@ object AppConstants {
         // Relay subscription validation
         const val SUBSCRIPTION_VALIDATION_INTERVAL_MS: Long = 30_000L
 
-        // Geohash presence heartbeat. Foreground is randomized to decorrelate
-        // clients; background is slowed down so an idle app stops waking the radio
-        // every minute.
+        // Geohash presence heartbeat. Every interval is randomized: a fixed period
+        // would be a timing fingerprint that helps link the per-geohash identities
+        // of one device across channels.
         const val PRESENCE_FOREGROUND_MIN_INTERVAL_MS: Long = 40_000L
         const val PRESENCE_FOREGROUND_MAX_INTERVAL_MS: Long = 80_000L
-        const val PRESENCE_BACKGROUND_INTERVAL_MS: Long = 900_000L
+
+        // Backgrounded. Stays under the 5 minute participant prune window in
+        // GeohashRepository so a backgrounded user keeps appearing in the lists.
+        const val PRESENCE_BACKGROUND_MIN_INTERVAL_MS: Long = 210_000L
+        const val PRESENCE_BACKGROUND_MAX_INTERVAL_MS: Long = 270_000L
+
+        // Backgrounded with reduced background activity opted in. Deliberately
+        // past the prune window: the user drops out of the lists while away.
+        const val PRESENCE_REDUCED_MIN_INTERVAL_MS: Long = 720_000L
+        const val PRESENCE_REDUCED_MAX_INTERVAL_MS: Long = 1_080_000L
 
         // Geohash participant list refresh
         const val PARTICIPANTS_REFRESH_INTERVAL_MS: Long = 30_000L

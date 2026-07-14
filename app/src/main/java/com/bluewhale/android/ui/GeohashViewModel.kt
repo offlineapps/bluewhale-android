@@ -122,9 +122,13 @@ class GeohashViewModel(
                     // Enter heartbeat loop for this set of channels
                     // If channels change (e.g. user moves), collectLatest cancels this loop and starts a new one immediately
                     while (true) {
-                        // Randomized in foreground, throttled hard while backgrounded
+                        // Randomized in every mode; slower while backgrounded
                         val loopInterval = com.bluewhale.android.geohash.GeohashCadence
-                            .presenceIntervalMs(isAppInForeground())
+                            .presenceIntervalMs(
+                                isForeground = isAppInForeground(),
+                                reduceBackgroundActivity = com.bluewhale.android.geohash
+                                    .BackgroundActivityPreferenceManager.isReduced()
+                            )
                         var timeSpent = 0L
 
                         try {
