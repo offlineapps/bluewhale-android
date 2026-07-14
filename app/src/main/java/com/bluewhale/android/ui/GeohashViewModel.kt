@@ -59,6 +59,14 @@ class GeohashViewModel(
         dataManager = dataManager
     )
 
+    // Fed by the lifecycle callbacks below; lifecycle state itself is main-thread only
+    // while the loops that need it run on IO
+    private val foregroundState = kotlinx.coroutines.flow.MutableStateFlow(
+        runCatching {
+            ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }.getOrDefault(true)
+    )
+
     private var currentGeohashSubId: String? = null
     private var currentDmSubId: String? = null
     private var geoTimer: Job? = null
@@ -400,6 +408,7 @@ class GeohashViewModel(
     }
 
     override fun onStart(owner: LifecycleOwner) {
+        foregroundState.value = true
         Log.d(TAG, "🌍 App foregrounded: Resuming sampling for ${activeSamplingGeohashes.size} geohashes")
         activeSamplingGeohashes.forEach { performSubscribeSampling(it) }
 
@@ -412,6 +421,7 @@ class GeohashViewModel(
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        foregroundState.value = false
         Log.d(TAG, "🌍 App backgrounded: Pausing sampling for ${activeSamplingGeohashes.size} geohashes")
         activeSamplingGeohashes.forEach { subscriptionManager.unsubscribe("sampling-$it") }
     }
@@ -426,7 +436,5 @@ class GeohashViewModel(
         )
     }
 
-    private fun isAppInForeground(): Boolean {
-        return ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-    }
+    private fun isAppInForeground(): Boolean = foregroundState.value
 }
