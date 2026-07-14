@@ -40,6 +40,9 @@ class PrivateChatManager(
     // Track received private messages that need read receipts
     private val unreadReceivedMessages = mutableMapOf<String, MutableList<BluewhaleMessage>>()
 
+    // Peers already warned about the mesh range, keyed with the range they were warned at
+    private val rangeWarningsShown = mutableSetOf<String>()
+
     // MARK: - Private Chat Lifecycle
 
     fun startPrivateChat(peerID: String, meshService: BluetoothMeshService): Boolean {
@@ -112,9 +115,33 @@ class PrivateChatManager(
         )
 
         messageManager.addPrivateMessage(peerID, message)
+        warnIfBeyondMeshRange(peerID, myPeerID)
         onSendMessage(content, peerID, recipientNickname ?: "", message.id)
 
         return true
+    }
+
+    /**
+     * A range-limited private message to a peer farther away than the range simply never
+     * arrives. Tell the sender once per peer and range instead of failing silently.
+     */
+    private fun warnIfBeyondMeshRange(peerID: String, myPeerID: String) {
+        try {
+            val warning = com.bluewhale.android.mesh.MeshRangeAdvisor.outOfRangeWarning(myPeerID, peerID) ?: return
+            val rangeHops = com.bluewhale.android.mesh.MeshRangePreferenceManager.rangeHops.value
+            if (!rangeWarningsShown.add("$peerID:$rangeHops")) return
+            messageManager.addPrivateMessage(
+                peerID,
+                BluewhaleMessage(
+                    sender = "system",
+                    content = warning,
+                    timestamp = Date(),
+                    isRelay = false
+                )
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "mesh range check failed: ${e.message}")
+        }
     }
 
     // MARK: - Peer Management
