@@ -51,6 +51,7 @@ class BluewhaleApplication : Application() {
 
         // Initialize mesh service preferences
         try { com.bluewhale.android.service.MeshServicePreferences.init(this) } catch (_: Exception) { }
+        try { com.bluewhale.android.geohash.BackgroundActivityPreferenceManager.init(this) } catch (_: Exception) { }
 
         // Initialize SMS gateway preferences so saved settings survive app restarts
         try { com.bluewhale.android.smsgateway.SmsGatewayPreferenceManager.init(this) } catch (_: Exception) { }

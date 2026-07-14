@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Lock
@@ -34,6 +35,7 @@ import androidx.compose.ui.res.stringResource
 import com.bluewhale.android.R
 import com.bluewhale.android.mesh.MeshRangePreferenceManager
 import com.bluewhale.android.util.AppConstants
+import com.bluewhale.android.geohash.BackgroundActivityPreferenceManager
 import com.bluewhale.android.core.ui.component.button.CloseButton
 import com.bluewhale.android.core.ui.component.sheet.BluewhaleBottomSheet
 import com.bluewhale.android.net.TorMode
@@ -497,6 +499,8 @@ fun AboutSheet(
                         val powEnabled by PoWPreferenceManager.powEnabled.collectAsState()
                         val powDifficulty by PoWPreferenceManager.powDifficulty.collectAsState()
                         var backgroundEnabled by remember { mutableStateOf(com.bluewhale.android.service.MeshServicePreferences.isBackgroundEnabled(true)) }
+                        LaunchedEffect(Unit) { BackgroundActivityPreferenceManager.init(context) }
+                        val reduceBackgroundActivity by BackgroundActivityPreferenceManager.reduced.collectAsState()
                         val torMode = remember { mutableStateOf(TorPreferenceManager.get(context)) }
                         val torProvider = remember { ArtiTorManager.getInstance() }
                         val torStatus by torProvider.statusFlow.collectAsState()
@@ -537,7 +541,23 @@ fun AboutSheet(
                                         modifier = Modifier.padding(start = 56.dp),
                                         color = colorScheme.outline.copy(alpha = 0.12f)
                                     )
-                                    
+
+                                    // Reduced Background Activity Toggle
+                                    SettingsToggleRow(
+                                        icon = Icons.Filled.BatterySaver,
+                                        title = stringResource(R.string.about_reduce_background_title),
+                                        subtitle = stringResource(R.string.about_reduce_background_desc),
+                                        checked = reduceBackgroundActivity,
+                                        onCheckedChange = { enabled ->
+                                            BackgroundActivityPreferenceManager.setReduced(enabled)
+                                        }
+                                    )
+
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+
                                     // Proof of Work Toggle
                                     SettingsToggleRow(
                                         icon = Icons.Filled.Speed,
