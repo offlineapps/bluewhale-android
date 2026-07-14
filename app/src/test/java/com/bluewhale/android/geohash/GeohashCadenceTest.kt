@@ -77,12 +77,13 @@ class GeohashCadenceTest {
     }
 
     @Test
-    fun `default background presence stays inside the participant prune window`() {
-        // GeohashRepository prunes participants after 5 minutes. The default
-        // background cadence must beat that or backgrounded users vanish.
+    fun `default background presence survives a dropped publish`() {
+        // GeohashRepository prunes participants after 5 minutes. Two consecutive
+        // background intervals must fit inside that window, so one lost or Doze
+        // deferred publish cannot drop a backgrounded user out of the lists.
         val pruneWindowMs = 5 * 60 * 1000L
         assertTrue(
-            AppConstants.Nostr.PRESENCE_BACKGROUND_MAX_INTERVAL_MS < pruneWindowMs
+            2 * AppConstants.Nostr.PRESENCE_BACKGROUND_MAX_INTERVAL_MS < pruneWindowMs
         )
     }
 
