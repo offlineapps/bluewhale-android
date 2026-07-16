@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
+## [1.1.0] - 2026-07-16
+
+### Added
+- `/ai <prompt>`: offline text generation. A language model runs on the device
+  and the reply is posted to the conversation the command was typed in, under
+  your nickname, prefixed with `[ai]` and quoting the prompt. Only successful
+  answers are transmitted; the thinking indicator, failures and usage errors
+  stay on the device. No model ships with the app: install a single MediaPipe
+  `.task` bundle as described in `docs/offline_ai.md` (#8).
+- Message range: a settings slider limiting how many hops (1 to 8, default 8,
+  the previous fixed reach) messages this device originates travel through the
+  mesh. Relaying for other peers is unaffected. A local warning is shown when
+  a private message is sent to a peer the mesh graph places beyond the
+  configured range (#9).
+- Optional "reduce background activity" setting, off by default, that slows
+  background presence to 12 to 18 minutes for maximum battery savings, at the
+  cost of dropping out of geohash lists until the app is opened (#10).
+
+### Changed
+- Reduced idle background battery usage: the mesh notification is event driven
+  instead of refreshed every 5 seconds, RSSI polling backs off when no peers
+  are connected, and presence heartbeats slow down while backgrounded. Idle
+  wakeups drop from roughly 1620 to 87 per hour with default settings (#10).
+- The arm64 APK grows about 26 MB from the bundled MediaPipe inference runtime,
+  whether or not a model is installed (#8).
+
 ## [1.0.0] - 2026-06-10
 
 First release of **bluewhale**, a fork of bitchat.
