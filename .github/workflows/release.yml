@@ -6,6 +6,9 @@ on:
     tags:
       - 'v*.*.*' # Triggers for tags like v1.0.0
 
+permissions:
+  contents: write # let the release job create the draft release
+
 # Signed release builds require these repository secrets:
 #   SIGNING_KEYSTORE_BASE64 - base64 of the release keystore: base64 -w0 bluewhale-release.keystore
 #   SIGNING_STORE_PASSWORD  - keystore password
