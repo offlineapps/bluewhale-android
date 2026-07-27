@@ -44,6 +44,13 @@ class SecureIdentityStateManager(private val context: Context) {
          * someone announcing its Noise key.
          */
         private const val CONTEST_TIMEOUT_MS = 10 * 60 * 1000L
+
+        /**
+         * Upper bound on stored signing key bindings. Announces are unauthenticated, so
+         * anyone in range can mint an entry per Noise key they invent, and every announce
+         * rescans and rewrites the whole set.
+         */
+        private const val MAX_SIGNING_KEY_BINDINGS = 512
     }
     
     private val prefs: SharedPreferences
@@ -330,7 +337,15 @@ class SecureIdentityStateManager(private val context: Context) {
                 existing == null -> SigningKeyBinding(signingKey, authenticated = false, contested = false, recordedAtMs = now)
                 existing.authenticated -> existing
                 existing.signingKeyHex == signingKey -> existing
-                else -> SigningKeyBinding(existing.signingKeyHex, authenticated = false, contested = true, recordedAtMs = now)
+                // The contest is timed from when it was first detected, not from the last
+                // announce that restated it. Re-stamping here would let anyone hold the
+                // binding contested forever by announcing on an interval below the timeout.
+                else -> SigningKeyBinding(
+                    existing.signingKeyHex,
+                    authenticated = false,
+                    contested = true,
+                    recordedAtMs = if (existing.contested) existing.recordedAtMs else now
+                )
             }
             if (next != existing) writeSigningKeyBinding(noiseKey, next)
             return next
@@ -369,7 +384,24 @@ class SecureIdentityStateManager(private val context: Context) {
         val current = prefs.getStringSet(KEY_SIGNING_KEY_BINDINGS, emptySet())?.toMutableSet() ?: mutableSetOf()
         current.removeAll { it.startsWith("$noiseKey=") }
         current.add("$noiseKey=${binding.signingKeyHex}|$state|${binding.recordedAtMs}")
-        prefs.edit { putStringSet(KEY_SIGNING_KEY_BINDINGS, current) }
+        prefs.edit { putStringSet(KEY_SIGNING_KEY_BINDINGS, capBindings(current)) }
+    }
+
+    /**
+     * Holds the binding set at [MAX_SIGNING_KEY_BINDINGS], evicting the oldest
+     * unauthenticated entries first so a flood of announced keys cannot push out a signing
+     * key that was proven over a Noise session.
+     */
+    private fun capBindings(entries: MutableSet<String>): Set<String> {
+        if (entries.size <= MAX_SIGNING_KEY_BINDINGS) return entries
+        val fields = { entry: String -> entry.substringAfter('=').split('|') }
+        val ranked = entries.sortedWith(
+            compareBy(
+                { fields(it).getOrNull(1) == STATE_AUTHENTICATED },
+                { fields(it).getOrNull(2)?.toLongOrNull() ?: 0L }
+            )
+        )
+        return ranked.drop(entries.size - MAX_SIGNING_KEY_BINDINGS).toMutableSet()
     }
 
     private fun isHex64(value: String) = value.matches(Regex("^[a-fA-F0-9]{64}$"))
