@@ -431,6 +431,15 @@ object BinaryProtocol {
                 val compressedPayload = ByteArray(compressedSize)
                 buffer.get(compressedPayload)
 
+                // The declared size is attacker controlled and unrelated to how many bytes
+                // actually arrived, so bound it before anything acts on it.
+                if (originalSize <= 0 ||
+                    originalSize > com.bluewhale.android.util.AppConstants.Protocol.MAX_DECOMPRESSED_BYTES
+                ) {
+                    Log.w("BinaryProtocol", "Rejecting declared decompressed size: $originalSize")
+                    return null
+                }
+
                 // Security check: Compression bomb protection
                 if (compressedSize > 0) {
                     val ratio = originalSize.toDouble() / compressedSize.toDouble()

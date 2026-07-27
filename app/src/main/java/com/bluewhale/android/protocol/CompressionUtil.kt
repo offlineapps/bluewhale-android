@@ -11,6 +11,8 @@ import java.util.zip.Inflater
  */
 object CompressionUtil {
     private const val COMPRESSION_THRESHOLD = com.bluewhale.android.util.AppConstants.Protocol.COMPRESSION_THRESHOLD_BYTES  // bytes - same as iOS
+    private const val MAX_DECOMPRESSED_BYTES = com.bluewhale.android.util.AppConstants.Protocol.MAX_DECOMPRESSED_BYTES
+    private const val INFLATE_CHUNK_BYTES = 16 * 1024
     
     /**
      * Helper to check if compression is worth it - exact same logic as iOS
@@ -73,47 +75,50 @@ object CompressionUtil {
      * iOS COMPRESSION_ZLIB produces raw deflate data (no headers)
      */
     fun decompress(compressedData: ByteArray, originalSize: Int): ByteArray? {
+        // originalSize is attacker controlled, so it is treated as a claim to check
+        // against, never as an amount of memory to reserve.
+        if (originalSize <= 0 || originalSize > MAX_DECOMPRESSED_BYTES) {
+            Log.w("CompressionUtil", "Rejecting declared decompressed size: $originalSize")
+            return null
+        }
+
         // iOS COMPRESSION_ZLIB produces raw deflate format (no headers)
+        inflate(compressedData, originalSize, raw = true)?.let { return it }
+
+        Log.d("CompressionUtil", "Raw deflate decompression failed, trying with zlib headers")
+        return inflate(compressedData, originalSize, raw = false)
+    }
+
+    /**
+     * Inflates in fixed chunks and stops as soon as the output exceeds what the sender
+     * declared, so a lie about the size costs a chunk rather than the claimed amount.
+     */
+    private fun inflate(compressedData: ByteArray, originalSize: Int, raw: Boolean): ByteArray? {
+        val inflater = Inflater(raw)
         try {
-            val inflater = Inflater(true) // true = raw deflate, no headers
             inflater.setInput(compressedData)
-            
-            val decompressedBuffer = ByteArray(originalSize)
-            val actualSize = inflater.inflate(decompressedBuffer)
-            inflater.end()
-            
-            // Verify decompressed size matches expected (same validation as iOS)
-            return if (actualSize == originalSize) {
-                decompressedBuffer
-            } else if (actualSize > 0) {
-                // Handle case where actual size is different
-                decompressedBuffer.copyOfRange(0, actualSize)
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            Log.d("CompressionUtil", "Raw deflate decompression failed: ${e.message}, trying with zlib headers...")
-            
-            // Fallback: try with zlib headers in case of mixed usage
-            try {
-                val inflater = Inflater(false) // false = expect zlib headers
-                inflater.setInput(compressedData)
-                
-                val decompressedBuffer = ByteArray(originalSize)
-                val actualSize = inflater.inflate(decompressedBuffer)
-                inflater.end()
-                
-                return if (actualSize == originalSize) {
-                    decompressedBuffer
-                } else if (actualSize > 0) {
-                    decompressedBuffer.copyOfRange(0, actualSize)
-                } else {
-                    null
+            val output = ByteArrayOutputStream(minOf(originalSize, INFLATE_CHUNK_BYTES))
+            val chunk = ByteArray(INFLATE_CHUNK_BYTES)
+
+            while (!inflater.finished()) {
+                val produced = inflater.inflate(chunk)
+                if (produced == 0) {
+                    if (inflater.needsInput() || inflater.needsDictionary()) break
+                    continue
                 }
-            } catch (fallbackException: Exception) {
-                Log.e("CompressionUtil", "Both raw deflate and zlib decompression failed: ${fallbackException.message}")
-                return null
+                if (output.size() + produced > originalSize) {
+                    Log.w("CompressionUtil", "Rejecting payload: expands past its declared size of $originalSize")
+                    return null
+                }
+                output.write(chunk, 0, produced)
             }
+
+            if (output.size() == 0) return null
+            return output.toByteArray()
+        } catch (e: Exception) {
+            return null
+        } finally {
+            inflater.end()
         }
     }
     
