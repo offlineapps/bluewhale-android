@@ -239,11 +239,13 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
         try {
             // LEAVE is included because it removes a peer on every node that sees it and
             // is relayed, so an unsigned one lets anybody evict a peer mesh wide.
+            // REQUEST_SYNC is included because answering one discloses cached history.
             if (MessageType.fromValue(packet.type) !in setOf(
                     MessageType.ANNOUNCE,
                     MessageType.MESSAGE,
                     MessageType.FILE_TRANSFER,
-                    MessageType.LEAVE
+                    MessageType.LEAVE,
+                    MessageType.REQUEST_SYNC
                 )) {
                 return true
             }
