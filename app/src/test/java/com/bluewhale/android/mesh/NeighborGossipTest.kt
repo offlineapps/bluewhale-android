@@ -4,6 +4,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.bluewhale.android.model.IdentityAnnouncement
 import com.bluewhale.android.services.meshgraph.GossipTLV
 import com.bluewhale.android.ui.debug.DebugPreferenceManager
+import com.bluewhale.android.ui.debug.DebugSettingsManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -61,6 +62,28 @@ class NeighborGossipTest {
         assertEquals(true, DebugPreferenceManager.getGossipNeighborsEnabled())
 
         DebugPreferenceManager.setGossipNeighborsEnabled(false)
+        assertEquals(false, DebugPreferenceManager.getGossipNeighborsEnabled())
+    }
+
+    /**
+     * The switch in the debug sheet drives DebugSettingsManager, which is what has to
+     * reach the stored preference. Without that link the setting is off for good and the
+     * mesh graph, source routing and the range warning stay dead with no way to enable it.
+     */
+    @Test
+    fun `the debug settings manager is what the sheet can toggle`() {
+        val manager = DebugSettingsManager.getInstance()
+
+        manager.setGossipNeighborsEnabled(true)
+        assertEquals("state the switch renders from", true, manager.gossipNeighborsEnabled.value)
+        assertEquals(
+            "the value the mesh service reads when building an announce",
+            true,
+            DebugPreferenceManager.getGossipNeighborsEnabled()
+        )
+
+        manager.setGossipNeighborsEnabled(false)
+        assertEquals(false, manager.gossipNeighborsEnabled.value)
         assertEquals(false, DebugPreferenceManager.getGossipNeighborsEnabled())
     }
 }

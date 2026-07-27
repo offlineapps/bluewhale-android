@@ -40,6 +40,9 @@ class DebugSettingsManager private constructor() {
     private val _packetRelayEnabled = MutableStateFlow(true)
     val packetRelayEnabled: StateFlow<Boolean> = _packetRelayEnabled.asStateFlow()
 
+    private val _gossipNeighborsEnabled = MutableStateFlow(false)
+    val gossipNeighborsEnabled: StateFlow<Boolean> = _gossipNeighborsEnabled.asStateFlow()
+
     // Visibility of the debug sheet; gates heavy work
     private val _debugSheetVisible = MutableStateFlow(false)
     val debugSheetVisible: StateFlow<Boolean> = _debugSheetVisible.asStateFlow()
@@ -60,6 +63,7 @@ class DebugSettingsManager private constructor() {
             _gattServerEnabled.value = DebugPreferenceManager.getGattServerEnabled(true)
             _gattClientEnabled.value = DebugPreferenceManager.getGattClientEnabled(true)
             _packetRelayEnabled.value = DebugPreferenceManager.getPacketRelayEnabled(true)
+            _gossipNeighborsEnabled.value = DebugPreferenceManager.getGossipNeighborsEnabled(false)
             _maxConnectionsOverall.value = DebugPreferenceManager.getMaxConnectionsOverall(8)
             _maxServerConnections.value = DebugPreferenceManager.getMaxConnectionsServer(8)
             _maxClientConnections.value = DebugPreferenceManager.getMaxConnectionsClient(8)
@@ -263,6 +267,14 @@ class DebugSettingsManager private constructor() {
         _packetRelayEnabled.value = enabled
         addDebugMessage(DebugMessage.SystemMessage(
             if (enabled) "📡 Packet relay enabled" else "🚫 Packet relay disabled"
+        ))
+    }
+
+    fun setGossipNeighborsEnabled(enabled: Boolean) {
+        DebugPreferenceManager.setGossipNeighborsEnabled(enabled)
+        _gossipNeighborsEnabled.value = enabled
+        addDebugMessage(DebugMessage.SystemMessage(
+            if (enabled) "🕸️ Neighbor gossip enabled" else "🙈 Neighbor gossip disabled"
         ))
     }
 
