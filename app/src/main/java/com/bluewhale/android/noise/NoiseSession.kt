@@ -45,64 +45,62 @@ class NoiseSession(
         // MARK: - Sliding Window Replay Protection
         
         /**
+         * A nonce is recorded at bit `highestReceivedNonce - nonce` of the window, so bit 0
+         * is the highest nonce seen so far and bit 1023 is the oldest one still tracked.
+         */
+        private fun isWindowBitSet(window: ByteArray, offset: Int): Boolean =
+            (window[offset / 8].toInt() and (1 shl (offset % 8))) != 0
+
+        private fun setWindowBit(window: ByteArray, offset: Int) {
+            window[offset / 8] = (window[offset / 8].toInt() or (1 shl (offset % 8))).toByte()
+        }
+
+        /**
          * Check if nonce is valid for replay protection (matching iOS implementation)
          */
         private fun isValidNonce(receivedNonce: Long, highestReceivedNonce: Long, replayWindow: ByteArray): Boolean {
             if (receivedNonce + REPLAY_WINDOW_SIZE <= highestReceivedNonce) {
                 return false  // Too old, outside window
             }
-            
+
             if (receivedNonce > highestReceivedNonce) {
                 return true  // Always accept newer nonces
             }
-            
-            val offset = (highestReceivedNonce - receivedNonce).toInt()
-            val byteIndex = offset / 8
-            val bitIndex = offset % 8
-            
-            return (replayWindow[byteIndex].toInt() and (1 shl bitIndex)) == 0  // Not yet seen
+
+            return !isWindowBitSet(replayWindow, (highestReceivedNonce - receivedNonce).toInt())
         }
-        
+
         /**
-         * Mark nonce as seen in replay window (matching iOS implementation)
+         * Mark nonce as seen in replay window.
+         *
+         * Advancing the window moves every recorded nonce further from the newest one, so
+         * each set bit moves from offset o to offset o + shift and anything past the end of
+         * the window is forgotten. Rebuilding the window by offset keeps that relationship
+         * explicit rather than expressing it as a byte-wise shift, which is where the
+         * previous version inverted the direction and dropped the history it was meant to
+         * keep.
          */
         private fun markNonceAsSeen(receivedNonce: Long, highestReceivedNonce: Long, replayWindow: ByteArray): Pair<Long, ByteArray> {
-            var newHighestReceivedNonce = highestReceivedNonce
-            val newReplayWindow = replayWindow.copyOf()
-            
-            if (receivedNonce > highestReceivedNonce) {
-                val shift = (receivedNonce - highestReceivedNonce).toInt()
-                
-                if (shift >= REPLAY_WINDOW_SIZE) {
-                    // Clear entire window - shift is too large
-                    newReplayWindow.fill(0)
-                } else {
-                    // Shift window right by `shift` bits
-                    for (i in (REPLAY_WINDOW_BYTES - 1) downTo 0) {
-                        val sourceByteIndex = i - shift / 8
-                        var newByte = 0
-                        
-                        if (sourceByteIndex >= 0) {
-                            newByte = (newReplayWindow[sourceByteIndex].toInt() and 0xFF) ushr (shift % 8)
-                            if (sourceByteIndex > 0 && shift % 8 != 0) {
-                                newByte = newByte or ((newReplayWindow[sourceByteIndex - 1].toInt() and 0xFF) shl (8 - shift % 8))
-                            }
-                        }
-                        
-                        newReplayWindow[i] = (newByte and 0xFF).toByte()
+            if (receivedNonce <= highestReceivedNonce) {
+                val updated = replayWindow.copyOf()
+                setWindowBit(updated, (highestReceivedNonce - receivedNonce).toInt())
+                return Pair(highestReceivedNonce, updated)
+            }
+
+            val shift = receivedNonce - highestReceivedNonce
+            val advanced = ByteArray(REPLAY_WINDOW_BYTES)
+
+            if (shift < REPLAY_WINDOW_SIZE) {
+                val shiftBits = shift.toInt()
+                for (offset in 0 until REPLAY_WINDOW_SIZE - shiftBits) {
+                    if (isWindowBitSet(replayWindow, offset)) {
+                        setWindowBit(advanced, offset + shiftBits)
                     }
                 }
-                
-                newHighestReceivedNonce = receivedNonce
-                newReplayWindow[0] = (newReplayWindow[0].toInt() or 1).toByte()  // Mark most recent bit as seen
-            } else {
-                val offset = (highestReceivedNonce - receivedNonce).toInt()
-                val byteIndex = offset / 8
-                val bitIndex = offset % 8
-                newReplayWindow[byteIndex] = (newReplayWindow[byteIndex].toInt() or (1 shl bitIndex)).toByte()
             }
-            
-            return Pair(newHighestReceivedNonce, newReplayWindow)
+
+            setWindowBit(advanced, 0)
+            return Pair(receivedNonce, advanced)
         }
         
         /**
