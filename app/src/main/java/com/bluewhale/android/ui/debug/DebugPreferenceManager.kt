@@ -10,6 +10,7 @@ import android.content.SharedPreferences
 object DebugPreferenceManager {
     private const val PREFS_NAME = "bluewhale_debug_settings"
     private const val KEY_VERBOSE = "verbose_logging"
+    private const val KEY_GOSSIP_NEIGHBORS = "gossip_neighbors_enabled"
     private const val KEY_GATT_SERVER = "gatt_server_enabled"
     private const val KEY_GATT_CLIENT = "gatt_client_enabled"
     private const val KEY_PACKET_RELAY = "packet_relay_enabled"
@@ -32,6 +33,14 @@ object DebugPreferenceManager {
 
     fun getVerboseLogging(default: Boolean = false): Boolean =
         if (ready()) prefs.getBoolean(KEY_VERBOSE, default) else default
+
+    // Off by default: sharing who is next to us is a disclosure, not a transport need.
+    fun getGossipNeighborsEnabled(default: Boolean = false): Boolean =
+        if (ready()) prefs.getBoolean(KEY_GOSSIP_NEIGHBORS, default) else default
+
+    fun setGossipNeighborsEnabled(value: Boolean) {
+        if (ready()) prefs.edit().putBoolean(KEY_GOSSIP_NEIGHBORS, value).apply()
+    }
 
     fun setVerboseLogging(value: Boolean) {
         if (ready()) prefs.edit().putBoolean(KEY_VERBOSE, value).apply()
