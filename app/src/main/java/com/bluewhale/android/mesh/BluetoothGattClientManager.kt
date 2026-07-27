@@ -309,6 +309,15 @@ class BluetoothGattClientManager(
     /**
      * Handle scan result and initiate connection if appropriate
      */
+    // Rotating advertisement value to the address that last showed it, so the same device
+    // seen under two addresses is not connected to twice. Bounded, entries are short lived.
+    private val advertisedIdToAddress = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, String>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>): Boolean =
+                size > 256
+        }
+    )
+
     private fun handleScanResult(result: ScanResult) {
         val device = result.device
         val rssi = result.rssi
@@ -321,21 +330,25 @@ class BluetoothGattClientManager(
             return
         }
 
-        // Try to extract peerID from Service Data (if available) for stable identity
+        // Rotating advertisement value, not a peer ID. Only good for spotting the same
+        // device under two addresses within one rotation window.
         val serviceData = scanRecord?.getServiceData(ParcelUuid(AppConstants.Mesh.Gatt.SERVICE_UUID))
-        val peerID = if (serviceData != null && serviceData.size >= 8) {
+        val advertisedId = if (serviceData != null && serviceData.size >= 8) {
             serviceData.joinToString("") { "%02x".format(it) }
         } else {
             null
         }
 
-        if (peerID != null) {
-            // Log.v(TAG, "Found peerID $peerID in scan record for $deviceAddress")
-            if (connectionTracker.isPeerConnected(peerID)) {
-                 Log.d(TAG, "Deduplication: Peer $peerID is already connected (ignoring $deviceAddress)")
-                 return
+        if (advertisedId != null) {
+            val knownAddress = advertisedIdToAddress.put(advertisedId, deviceAddress)
+            if (knownAddress != null && knownAddress != deviceAddress &&
+                connectionTracker.isDeviceConnected(knownAddress)
+            ) {
+                Log.d(TAG, "Deduplication: already connected to this device as $knownAddress")
+                return
             }
         }
+        val peerID = connectionTracker.addressPeerMap[deviceAddress]
 
         // Log.d(TAG, "Received scan result from $deviceAddress - already connected: ${connectionTracker.isDeviceConnected(deviceAddress)}")
         
