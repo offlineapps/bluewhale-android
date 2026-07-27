@@ -200,9 +200,10 @@ class BluetoothMeshService(private val context: Context) {
                 // Send announcement and cached messages after key exchange
                 serviceScope.launch {
                     Log.d(TAG, "Key exchange completed with $peerID; sending follow-ups")
+                    sendPeerState(peerID)
                     delay(100)
                     sendAnnouncementToPeer(peerID)
-                    
+
                     delay(1000)
                     storeForwardManager.sendCachedMessages(peerID)
                 }
@@ -310,6 +311,11 @@ class BluetoothMeshService(private val context: Context) {
             
             override fun verifyEd25519Signature(signature: ByteArray, data: ByteArray, publicKey: ByteArray): Boolean {
                 return encryptionService.verifyEd25519Signature(signature, data, publicKey)
+            }
+
+            override fun getAuthenticatedNoiseKey(peerID: String): ByteArray? {
+                if (!encryptionService.hasEstablishedSession(peerID)) return null
+                return encryptionService.getPeerStaticPublicKey(peerID)
             }
             
             // Noise protocol operations
@@ -1317,6 +1323,40 @@ class BluetoothMeshService(private val context: Context) {
         }
     }
     
+    /**
+     * Tells a peer which Ed25519 signing key and capabilities belong to this device. It
+     * travels inside the
+     * Noise session, so the receiver can attribute it to the static key the handshake
+     * authenticated rather than to an announce anybody could have written.
+     */
+    private fun sendPeerState(peerID: String) {
+        try {
+            val signingKey = encryptionService.getSigningPublicKey() ?: return
+            val state = com.bluewhale.android.model.PeerStatePayload(
+                capabilities = com.bluewhale.android.model.PeerStatePayload.CAPABILITY_PRIVATE_MEDIA,
+                signingPublicKey = signingKey
+            ).encode() ?: return
+            val payload = com.bluewhale.android.model.NoisePayload(
+                type = com.bluewhale.android.model.NoisePayloadType.PEER_STATE,
+                data = state
+            )
+            val encrypted = securityManager.encryptForPeer(payload.encode(), peerID) ?: return
+            val packet = BluewhalePacket(
+                version = 1u,
+                type = MessageType.NOISE_ENCRYPTED.value,
+                senderID = hexStringToByteArray(myPeerID),
+                recipientID = hexStringToByteArray(peerID),
+                timestamp = System.currentTimeMillis().toULong(),
+                payload = encrypted,
+                signature = null,
+                ttl = MAX_TTL
+            )
+            connectionManager.broadcastPacket(RoutedPacket(packet))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to send peer state to $peerID: ${e.message}")
+        }
+    }
+
     /**
      * Convert hex string peer ID to binary data (8 bytes) - exactly same as iOS
      */

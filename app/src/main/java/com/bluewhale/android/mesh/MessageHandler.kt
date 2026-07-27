@@ -5,6 +5,7 @@ import com.bluewhale.android.model.BluewhaleMessage
 import com.bluewhale.android.model.BluewhaleMessageType
 import com.bluewhale.android.model.IdentityAnnouncement
 import com.bluewhale.android.model.RoutedPacket
+import com.bluewhale.android.noise.NoisePeerIdentity
 import com.bluewhale.android.protocol.BluewhalePacket
 import com.bluewhale.android.protocol.MessageType
 import com.bluewhale.android.util.toHexString
@@ -30,6 +31,10 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     
     // Coroutines
     private val handlerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val identityManager by lazy {
+        com.bluewhale.android.identity.SecureIdentityStateManager(appContext)
+    }
     
     /**
      * Handle Noise encrypted transport message - SIMPLIFIED iOS-compatible version
@@ -157,6 +162,9 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                     // Simplified: Call delegate with messageID and peerID directly
                     delegate?.onReadReceiptReceived(messageID, peerID)
                 }
+                com.bluewhale.android.model.NoisePayloadType.PEER_STATE -> {
+                    handleAuthenticatedPeerState(peerID, noisePayload.data)
+                }
                 com.bluewhale.android.model.NoisePayloadType.VERIFY_CHALLENGE -> {
                     Log.d(TAG, "🔐 Verify challenge received from $peerID (${noisePayload.data.size} bytes)")
                     delegate?.onVerifyChallengeReceived(peerID, noisePayload.data, packet.timestamp.toLong())
@@ -172,6 +180,29 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         }
     }
     
+    /**
+     * A signing key that arrives inside an established Noise session is proven to come
+     * from the holder of that session's static key, which an announced one is not.
+     * Payload type 0x21, shared with bitchat and iOS.
+     */
+    private fun handleAuthenticatedPeerState(peerID: String, payload: ByteArray) {
+        val state = com.bluewhale.android.model.PeerStatePayload.decode(payload)
+        if (state == null) {
+            Log.w(TAG, "Ignoring peer state from $peerID: malformed payload")
+            return
+        }
+        val signingPublicKey = state.signingPublicKey
+        val noiseKey = delegate?.getAuthenticatedNoiseKey(peerID)
+        if (noiseKey == null) {
+            Log.w(TAG, "Ignoring peer state from $peerID: no established session to attribute it to")
+            return
+        }
+        val noiseKeyHex = noiseKey.joinToString("") { "%02x".format(it) }
+        val signingKeyHex = signingPublicKey.joinToString("") { "%02x".format(it) }
+        identityManager.recordAuthenticatedSigningKey(noiseKeyHex, signingKeyHex)
+        Log.d(TAG, "Authenticated signing key for ${peerID.take(8)}")
+    }
+
     /**
      * Send delivery ACK for a received private message - exactly like iOS
      */
@@ -233,7 +264,15 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             Log.w(TAG, "Failed to decode announce from $peerID as iOS-compatible TLV format")
             return false
         }
-        
+
+        // A peer ID is the first 8 bytes of SHA-256 over the Noise static key, so an
+        // announce may only claim the peer ID its own announced key hashes to.
+        if (!NoisePeerIdentity.matchesClaimedPeerID(peerID, announcement.noisePublicKey) ||
+            !NoisePeerIdentity.matchesClaimedPeerID(packet.senderID.toHexString(), announcement.noisePublicKey)) {
+            Log.w(TAG, "Ignoring announce from ${peerID.take(8)}: peer ID not derived from announced Noise key")
+            return false
+        }
+
         // Verify packet signature using the announced signing public key
         var verified = false
         if (packet.signature != null) {
@@ -255,10 +294,43 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
 
         // Require verified announce; ignore otherwise (no backward compatibility)
         if (!verified) {
-            Log.w(TAG, "❌ Ignoring unverified announce from ${peerID.take(8)}...")
+            Log.w(TAG, "Ignoring unverified announce from ${peerID.take(8)}")
             return false
         }
-        
+
+        // The peer ID binds the Noise key but says nothing about the signing key, and the
+        // Noise key is public, so anyone can announce it under a signing key of their own.
+        // Only a signing key proven through a Noise session settles the question.
+        val noiseKeyHex = announcement.noisePublicKey.joinToString("") { "%02x".format(it) }
+        val signingKeyHex = announcement.signingPublicKey.joinToString("") { "%02x".format(it) }
+        val binding = identityManager.recordAnnouncedSigningKey(noiseKeyHex, signingKeyHex)
+        if (binding != null && binding.authenticated &&
+            !binding.signingKeyHex.equals(signingKeyHex, ignoreCase = true)) {
+            Log.w(TAG, "Ignoring announce from ${peerID.take(8)}: signing key contradicts the one proven over a Noise session")
+            return false
+        }
+        if (binding != null && binding.contested) {
+            // Two signing keys have been announced for this Noise key, so one of them is an
+            // impostor and announces cannot say which. Drop the peer to unverified, which
+            // stops public messages being attributed to it, until a session settles it.
+            //
+            // The announcer's own nickname and signing key are deliberately not written
+            // here. Anyone can replay a peer's public Noise key under a signing key of
+            // their own, and adopting it would replace the real peer's recorded key, so
+            // its genuinely signed packets would start failing verification.
+            Log.w(TAG, "Announce from ${peerID.take(8)} is contested: recording as unverified")
+            if (existingPeer?.noisePublicKey != null && existingPeer.signingPublicKey != null) {
+                delegate?.updatePeerInfo(
+                    peerID = peerID,
+                    nickname = existingPeer.nickname,
+                    noisePublicKey = existingPeer.noisePublicKey!!,
+                    signingPublicKey = existingPeer.signingPublicKey!!,
+                    isVerified = false
+                )
+            }
+            return false
+        }
+
         // Successfully decoded TLV format exactly like iOS
         Log.d(TAG, "✅ Verified announce from $peerID: nickname=${announcement.nickname}, " +
                 "noisePublicKey=${announcement.noisePublicKey.joinToString("") { "%02x".format(it) }.take(16)}..., " +
@@ -610,6 +682,7 @@ interface MessageHandlerDelegate {
     fun encryptForPeer(data: ByteArray, recipientPeerID: String): ByteArray?
     fun decryptFromPeer(encryptedData: ByteArray, senderPeerID: String): ByteArray?
     fun verifyEd25519Signature(signature: ByteArray, data: ByteArray, publicKey: ByteArray): Boolean
+    fun getAuthenticatedNoiseKey(peerID: String): ByteArray?
     
     // Noise protocol operations
     fun hasNoiseSession(peerID: String): Boolean

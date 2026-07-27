@@ -103,9 +103,16 @@ class NoiseSessionManager(
             
             // Check if session is established
             if (session.isEstablished()) {
-                Log.d(TAG, "✅ Session ESTABLISHED with $peerID")
                 val remoteStaticKey = session.getRemoteStaticPublicKey()
                 if (remoteStaticKey != null) {
+                    // The handshake proves possession of the remote static key, so the peer
+                    // ID it is claiming must be the one that key derives to.
+                    if (!NoisePeerIdentity.matchesClaimedPeerID(peerID, remoteStaticKey)) {
+                        Log.w(TAG, "Dropping session: $peerID is not the peer ID its static key derives to")
+                        removeSession(peerID)
+                        return null
+                    }
+                    Log.d(TAG, "Session established with $peerID")
                     onSessionEstablished?.invoke(peerID, remoteStaticKey)
                 }
             }
