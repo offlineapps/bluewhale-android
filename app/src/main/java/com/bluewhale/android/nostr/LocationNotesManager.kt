@@ -361,6 +361,12 @@ class LocationNotesManager private constructor() {
             Log.v(TAG, "Ignoring non-text-note event: kind=${event.kind}")
             return
         }
+
+        // Relays are untrusted, so the pubkey means nothing until the signature holds.
+        if (!event.isValidSignature()) {
+            Log.w(TAG, "Dropping note ${event.id.take(16)} with an invalid signature")
+            return
+        }
         
         // Check for geohash tag
         val geohashTag = event.tags.firstOrNull { it.size >= 2 && it[0] == "g" }
