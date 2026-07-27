@@ -233,7 +233,15 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             Log.w(TAG, "Failed to decode announce from $peerID as iOS-compatible TLV format")
             return false
         }
-        
+
+        // A peer ID is the first 8 bytes of SHA-256 over the Noise static key, so an
+        // announce may only claim the peer ID its own announced key hashes to.
+        if (!peerIDMatchesNoiseKey(peerID, announcement.noisePublicKey) ||
+            !peerIDMatchesNoiseKey(packet.senderID.toHexString(), announcement.noisePublicKey)) {
+            Log.w(TAG, "❌ Ignoring announce from ${peerID.take(8)}: peer ID not derived from announced Noise key")
+            return false
+        }
+
         // Verify packet signature using the announced signing public key
         var verified = false
         if (packet.signature != null) {
@@ -509,6 +517,19 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         }
     }
     
+    /**
+     * A peer ID is the first 8 bytes of SHA-256 over the peer's Noise static public key.
+     */
+    private fun peerIDMatchesNoiseKey(peerID: String, noisePublicKey: ByteArray): Boolean {
+        if (noisePublicKey.size != 32) return false
+        if (peerID.length != 16) return false
+        val derived = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(noisePublicKey)
+            .take(8)
+            .joinToString("") { "%02x".format(it) }
+        return derived.equals(peerID, ignoreCase = true)
+    }
+
     /**
      * Convert hex string peer ID to binary data (8 bytes) - same as iOS implementation
      */
