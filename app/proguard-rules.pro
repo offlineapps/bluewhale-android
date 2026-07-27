@@ -27,6 +27,17 @@
 -dontwarn info.guardianproject.arti.**
 -dontwarn org.torproject.arti.**
 
+# MediaPipe LLM inference (/ai). Options reach the native engine as protobuf-lite
+# messages whose fields are looked up reflectively by name, so they must keep their
+# names; the async JNI callback is likewise resolved by name.
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite {
+    <fields>;
+}
+-keepclassmembers class com.google.mediapipe.tasks.genai.llminference.** {
+    void onAsyncResponse(byte[]);
+}
+-dontwarn com.google.mediapipe.framework.image.**
+
 # Fix for AbstractMethodError on API < 29 where LocationListener methods are abstract
 -keepclassmembers class * implements android.location.LocationListener {
     public <methods>;

@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
+## [Unreleased]
+
+### Fixed
+- `/ai` failed on every model in release builds with "Field modelPath_ for T4.g
+  not found". R8 stripped the protobuf fields that MediaPipe resolves by name
+  when it passes the model options to the native engine (#11).
+
 ## [1.1.0] - 2026-07-16
 
 ### Added
