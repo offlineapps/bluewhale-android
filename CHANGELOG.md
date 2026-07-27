@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-07-28
+
+A security release. Every mesh-facing fix below is reachable from unauthenticated
+Bluetooth traffic, so upgrading is recommended for anyone running 1.1.0 or 1.0.0.
+
+### Security
+- An announce may now only claim the peer ID that its own announced Noise key
+  hashes to, and a signing key learned from an announce stays provisional until
+  one is proven inside an established Noise session. Without that binding any
+  device in range could take over another peer's identity by announcing it
+  under keys of its own (#12).
+- The NIP-17 seal is authenticated before the rumor's author is trusted, so a
+  private message can no longer be attributed to somebody who did not send it
+  (#13).
+- The declared decompressed size of a compressed payload is checked before it
+  is acted on, so a small hostile packet can no longer exhaust memory (#16).
+- The replay window advanced in the wrong direction: recorded nonces moved away
+  from, rather than with, the newest one as the window slid, so a nonce that
+  had already been seen could be accepted again (#17).
+- The SMS gateway receiver now requires BROADCAST_SMS, so only the system can
+  trigger it rather than any app on the device (#18).
+- LEAVE packets must carry a valid signature. An unsigned one is relayed and
+  removes the sender from the peer list of every node that sees it, so anyone
+  in range could evict any peer across the whole mesh (#19).
+- An established Noise session is no longer torn down when an unauthenticated
+  handshake arrives. A replacement is negotiated alongside it and only takes
+  over once it completes, so a handshake packet, which carries no signature and
+  whose sender ID is only a claim, can no longer cut two peers off from each
+  other. A peer that genuinely lost its state still recovers (#20).
+- Signatures on geohash events and location notes are verified (#21).
+- Sync requests must carry a valid signature, so answering one cannot disclose
+  cached history to an unauthenticated peer (#22).
+- State keyed by an unauthenticated peer ID is bounded. Per-peer packet queues,
+  tracked peers, in-progress handshakes and stored signing key bindings all
+  have caps, so a peer inventing identities cannot grow memory without limit
+  (#23).
+- The list of direct neighbours is no longer attached to announces unless it is
+  switched on in debug settings. It mapped who is physically next to whom for
+  anyone listening (#24).
+- The 8 bytes advertised over BLE are now an HMAC over a device-local secret
+  and the current 15 minute window, instead of a value derived from the peer
+  ID. A scanner can still tell two advertisements apart within a window but can
+  no longer recognise a device across them (#25).
+
+### Changed
+- Screen capture is blocked across every screen in the app. Screenshots and
+  screen recordings come out blank, the app's contents are hidden in the recent
+  apps thumbnail, and it will not mirror to non-secure external displays (#14).
+
 ### Fixed
 - `/ai` failed on every model in release builds with "Field modelPath_ for T4.g
   not found". R8 stripped the protobuf fields that MediaPipe resolves by name
