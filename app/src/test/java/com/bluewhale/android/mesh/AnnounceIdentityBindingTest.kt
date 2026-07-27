@@ -15,6 +15,7 @@ import org.bouncycastle.crypto.params.Ed25519KeyGenerationParameters
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -35,11 +36,13 @@ class AnnounceIdentityBindingTest {
 
     private class RecordingDelegate(
         private val authenticatedNoiseKey: ByteArray? = null,
-        private val decrypted: ByteArray? = null
+        private val decrypted: ByteArray? = null,
+        private val existingPeer: PeerInfo? = null
     ) : MessageHandlerDelegate {
         var acceptedPeerID: String? = null
         var acceptedNickname: String? = null
         var acceptedVerified: Boolean? = null
+        var acceptedSigningKey: ByteArray? = null
 
         override fun getAuthenticatedNoiseKey(peerID: String): ByteArray? = authenticatedNoiseKey
 
@@ -53,6 +56,7 @@ class AnnounceIdentityBindingTest {
             acceptedPeerID = peerID
             acceptedNickname = nickname
             acceptedVerified = isVerified
+            acceptedSigningKey = signingPublicKey
             return true
         }
 
@@ -75,7 +79,7 @@ class AnnounceIdentityBindingTest {
         override fun getPeerNickname(peerID: String): String? = null
         override fun getNetworkSize(): Int = 1
         override fun getMyNickname(): String? = "me"
-        override fun getPeerInfo(peerID: String): PeerInfo? = null
+        override fun getPeerInfo(peerID: String): PeerInfo? = existingPeer
         override fun sendPacket(packet: BluewhalePacket) {}
         override fun relayPacket(routed: RoutedPacket) {}
         override fun getBroadcastRecipient(): ByteArray = ByteArray(8) { 0xFF.toByte() }
@@ -144,14 +148,27 @@ class AnnounceIdentityBindingTest {
     private fun handle(
         packet: BluewhalePacket,
         fromPeerID: String,
-        authenticatedNoiseKey: ByteArray? = null
+        authenticatedNoiseKey: ByteArray? = null,
+        existingPeer: PeerInfo? = null
     ): RecordingDelegate {
-        val delegate = RecordingDelegate(authenticatedNoiseKey)
+        val delegate = RecordingDelegate(authenticatedNoiseKey, existingPeer = existingPeer)
         val handler = MessageHandler("00000000deadbeef", ApplicationProvider.getApplicationContext())
         handler.delegate = delegate
         runBlocking { handler.handleAnnounce(RoutedPacket(packet, fromPeerID, null)) }
         return delegate
     }
+
+    /** The peer state a victim already has recorded before an impostor announces. */
+    private fun knownPeer(peerID: String, noiseKey: ByteArray, signingKey: ByteArray) = PeerInfo(
+        id = peerID,
+        nickname = "victim",
+        isConnected = true,
+        isDirectConnection = true,
+        noisePublicKey = noiseKey,
+        signingPublicKey = signingKey,
+        isVerifiedNickname = true,
+        lastSeen = System.currentTimeMillis()
+    )
 
     @Test
     fun `announce bound to its own noise key is accepted`() {
@@ -204,19 +221,44 @@ class AnnounceIdentityBindingTest {
     fun `second signing key for one noise key leaves the peer unverified`() {
         val noiseKey = ByteArray(32) { (it + 7).toByte() }
         val peerID = derivePeerID(noiseKey)
+        val victimKeys = newSigningKeyPair()
 
-        val first = handle(signedAnnounce(peerID, noiseKey), peerID)
+        val first = handle(signedAnnounce(peerID, noiseKey, victimKeys), peerID)
         assertEquals(true, first.acceptedVerified)
 
         // Mallory reuses the victim's noise key and peer ID, which satisfies the
         // derivation check, but signs with a signing key of her own. Announces alone
         // cannot say which of the two is genuine, so neither stays verified.
-        val second = handle(signedAnnounce(peerID, noiseKey), peerID)
+        val victim = knownPeer(peerID, noiseKey, victimKeys.second.encoded)
+        val second = handle(signedAnnounce(peerID, noiseKey), peerID, existingPeer = victim)
         assertEquals(false, second.acceptedVerified)
 
         // Including the peer that announced first, which is now contested too.
-        val third = handle(signedAnnounce(peerID, noiseKey), peerID)
+        val third = handle(signedAnnounce(peerID, noiseKey, victimKeys), peerID, existingPeer = victim)
         assertEquals(false, third.acceptedVerified)
+    }
+
+    @Test
+    fun `contested announce does not overwrite the victims recorded identity`() {
+        val noiseKey = ByteArray(32) { (it + 33).toByte() }
+        val peerID = derivePeerID(noiseKey)
+        val victimKeys = newSigningKeyPair()
+
+        handle(signedAnnounce(peerID, noiseKey, victimKeys), peerID)
+
+        // A Noise public key is public, so Mallory can replay the victim's under a signing
+        // key of her own. Recording hers would replace the key the victim's MESSAGE and
+        // LEAVE packets are verified against, silencing the victim under Mallory's name.
+        val victim = knownPeer(peerID, noiseKey, victimKeys.second.encoded)
+        val contested = handle(signedAnnounce(peerID, noiseKey), peerID, existingPeer = victim)
+
+        assertEquals(false, contested.acceptedVerified)
+        assertEquals("victim", contested.acceptedNickname)
+        assertArrayEquals(
+            "the victim's signing key must survive a contested announce",
+            victimKeys.second.encoded,
+            contested.acceptedSigningKey
+        )
     }
 
     @Test
