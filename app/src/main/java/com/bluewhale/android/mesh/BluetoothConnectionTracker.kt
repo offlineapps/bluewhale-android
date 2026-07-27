@@ -294,6 +294,28 @@ class BluetoothConnectionTracker(
     }
     
     /**
+     * Addresses holding a redundant link to [peerID], to be dropped.
+     *
+     * The value a device puts in its scan response rotates and is not derived from
+     * anything public, so a scanner cannot tell that an unfamiliar address belongs to a
+     * peer it already holds a link to. That only becomes visible once the peer announces
+     * itself on both links. An inbound link is kept over one we dialled, and an older link
+     * over a newer one, so the choice does not depend on which announce arrived last and
+     * the two links cannot take turns tearing each other down.
+     */
+    fun redundantAddressesForPeer(peerID: String): List<String> {
+        val links = addressPeerMap.entries
+            .filter { it.value == peerID }
+            .mapNotNull { entry -> connectedDevices[entry.key]?.let { entry.key to it } }
+        if (links.size < 2) return emptyList()
+
+        val keep = links.minWithOrNull(
+            compareBy({ it.second.isClient }, { it.second.connectedAt })
+        ) ?: return emptyList()
+        return links.filter { it.first != keep.first }.map { it.first }
+    }
+
+    /**
      * Clean up a specific device connection
      */
     fun cleanupDeviceConnection(deviceAddress: String) {

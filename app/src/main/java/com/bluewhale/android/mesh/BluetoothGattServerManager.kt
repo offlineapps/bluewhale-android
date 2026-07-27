@@ -42,6 +42,7 @@ class BluetoothGattServerManager(
     private var gattServer: BluetoothGattServer? = null
     private var characteristic: BluetoothGattCharacteristic? = null
     private var advertiseCallback: AdvertiseCallback? = null
+    private var rotationJob: kotlinx.coroutines.Job? = null
     
     // State management
     private var isActive = false
@@ -358,10 +359,10 @@ class BluetoothGattServerManager(
             .setIncludeDeviceName(false)
             .build()
             
-        // Add stable identity (first 8 bytes of peerID) to Scan Response
-        // This allows scanners to deduplicate devices even if MAC address rotates
+        // Rotating value, not the peer ID: a fixed one would follow the user across
+        // locations for anyone running a scanner.
         val peerIDBytes = try {
-            myPeerID.chunked(2).map { it.toInt(16).toByte() }.toByteArray().take(8).toByteArray()
+            AdvertisementIdentity.currentId(context)
         } catch (e: Exception) {
             ByteArray(0)
         }
@@ -377,7 +378,7 @@ class BluetoothGattServerManager(
                 val mode = try {
                     powerManager.getPowerInfo().split("Current Mode: ")[1].split("\n")[0]
                 } catch (_: Exception) { "unknown" }
-                Log.i(TAG, "Advertising started (power mode: $mode) with stable ID: ${peerIDBytes.joinToString("") { "%02x".format(it) }}")
+                Log.i(TAG, "Advertising started (power mode: $mode)")
             }
             
             override fun onStartFailure(errorCode: Int) {
@@ -385,6 +386,8 @@ class BluetoothGattServerManager(
             }
         }
         
+        scheduleAdvertisementRotation()
+
         try {
             bleAdvertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
         } catch (se: SecurityException) {
@@ -394,6 +397,15 @@ class BluetoothGattServerManager(
         }
     }
     
+    /** Re-advertises when the rotating value changes. */
+    private fun scheduleAdvertisementRotation() {
+        rotationJob?.cancel()
+        rotationJob = connectionScope.launch {
+            kotlinx.coroutines.delay(AdvertisementIdentity.millisUntilRotation())
+            if (isActive) restartAdvertising()
+        }
+    }
+
     /**
      * Stop advertising
      */
@@ -401,6 +413,8 @@ class BluetoothGattServerManager(
     private fun stopAdvertising() {
         if (!permissionManager.hasBluetoothPermissions() || bleAdvertiser == null) return
         try {
+            rotationJob?.cancel()
+            rotationJob = null
             advertiseCallback?.let { cb -> bleAdvertiser.stopAdvertising(cb) }
         } catch (e: Exception) {
             Log.w(TAG, "Error stopping advertising: ${e.message}")
