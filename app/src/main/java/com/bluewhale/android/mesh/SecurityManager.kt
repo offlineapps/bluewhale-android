@@ -237,11 +237,13 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
      */
     private fun verifyPacketSignature(packet: BluewhalePacket, peerID: String): Boolean {
         try {
-            // only verify ANNOUNCE, MESSAGE, and FILE_TRANSFER
+            // LEAVE is included because it removes a peer on every node that sees it and
+            // is relayed, so an unsigned one lets anybody evict a peer mesh wide.
             if (MessageType.fromValue(packet.type) !in setOf(
                     MessageType.ANNOUNCE,
                     MessageType.MESSAGE,
-                    MessageType.FILE_TRANSFER
+                    MessageType.FILE_TRANSFER,
+                    MessageType.LEAVE
                 )) {
                 return true
             }
