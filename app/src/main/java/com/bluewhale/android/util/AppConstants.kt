@@ -78,6 +78,10 @@ object AppConstants {
 
     object Protocol {
         const val COMPRESSION_THRESHOLD_BYTES: Int = 100
+
+        // A decoded payload may not exceed the memory the transport is already willing to
+        // spend on all in-flight reassembly, so one packet cannot outweigh the whole budget.
+        const val MAX_DECOMPRESSED_BYTES: Int = 4 * 1_048_576
     }
 
     object StoreForward {
