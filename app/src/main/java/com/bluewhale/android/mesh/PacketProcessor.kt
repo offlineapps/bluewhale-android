@@ -5,7 +5,6 @@ import com.bluewhale.android.protocol.BluewhalePacket
 import com.bluewhale.android.protocol.MessageType
 import com.bluewhale.android.model.RoutedPacket
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.actor
 
 /**
@@ -20,7 +19,15 @@ class PacketProcessor(private val myPeerID: String) {
     
     companion object {
         private const val TAG = "PacketProcessor"
+
+        // Bounds on state keyed by an unauthenticated peer ID.
+        private const val MAX_TRACKED_PEERS = 256
+        private const val MAX_QUEUED_PACKETS_PER_PEER = 512
+        private const val MAX_WAITING_OVERFLOW_SENDS = 256
     }
+
+    // Caps how many packets may be waiting on a full per-peer queue at once.
+    private val overflowPermits = kotlinx.coroutines.sync.Semaphore(MAX_WAITING_OVERFLOW_SENDS)
     
     // Delegate for callbacks
     var delegate: PacketProcessorDelegate? = null
@@ -37,14 +44,10 @@ class PacketProcessor(private val myPeerID: String) {
     // Coroutines
     private val processorScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
-    // Per-peer actors to serialize packet processing
-    // Each peer gets its own actor that processes packets sequentially
-    // This prevents race conditions in session management
-    private val peerActors = mutableMapOf<String, CompletableDeferred<Unit>>()
     
     @OptIn(ObsoleteCoroutinesApi::class)
     private fun getOrCreateActorForPeer(peerID: String) = processorScope.actor<RoutedPacket>(
-        capacity = Channel.UNLIMITED
+        capacity = MAX_QUEUED_PACKETS_PER_PEER
     ) {
         Log.d(TAG, "🎭 Created packet actor for peer: ${formatPeerForLog(peerID)}")
         try {
@@ -58,8 +61,22 @@ class PacketProcessor(private val myPeerID: String) {
         }
     }
     
-    // Cache actors to reuse them
-    private val actors = mutableMapOf<String, kotlinx.coroutines.channels.SendChannel<RoutedPacket>>()
+    // Peer IDs are unauthenticated at this point, so the number of actors is bounded and
+    // the least recently used one is closed when the cap is reached. Access order makes the
+    // map an LRU. Guarded by actorsLock because packets arrive on BLE callback threads.
+    private val actors = object : LinkedHashMap<String, kotlinx.coroutines.channels.SendChannel<RoutedPacket>>(
+        16, 0.75f, true
+    ) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<String, kotlinx.coroutines.channels.SendChannel<RoutedPacket>>
+        ): Boolean {
+            if (size <= MAX_TRACKED_PEERS) return false
+            eldest.value.close()
+            Log.d(TAG, "Closed packet actor for ${eldest.key} to stay within $MAX_TRACKED_PEERS peers")
+            return true
+        }
+    }
+    private val actorsLock = Any()
     
     init {
         // Set up the packet relay manager delegate immediately
@@ -79,17 +96,35 @@ class PacketProcessor(private val myPeerID: String) {
             return
         }
         
-        // Get or create actor for this peer
-        val actor = actors.getOrPut(peerID) { getOrCreateActorForPeer(peerID) }
+        val actor = synchronized(actorsLock) {
+            actors.getOrPut(peerID) { getOrCreateActorForPeer(peerID) }
+        }
         
-        // Send packet to peer's dedicated actor for serialized processing
+        // trySend rather than a launched send, so a peer flooding us costs a bounded
+        // queue instead of an unbounded pile of waiting coroutines.
+        val result = actor.trySend(routed)
+        if (result.isSuccess) return
+
+        if (result.isClosed) {
+            Log.d(TAG, "Actor for ${formatPeerForLog(peerID)} was closed, dropping packet")
+            return
+        }
+
+        // A full queue is not on its own a reason to lose the packet. Fragments are
+        // reassembled from a complete run, so silently dropping one mid burst strands the
+        // whole transfer. The waiting send is allowed but the number of waiters is capped,
+        // which keeps the bound this class exists to provide.
+        if (!overflowPermits.tryAcquire()) {
+            Log.w(TAG, "Dropping packet from ${formatPeerForLog(peerID)}: overflow capacity reached")
+            return
+        }
         processorScope.launch {
             try {
                 actor.send(routed)
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to send packet to actor for ${formatPeerForLog(peerID)}: ${e.message}")
-                // Fallback to direct processing if actor fails
-                handleReceivedPacket(routed)
+                Log.d(TAG, "Overflow send for ${formatPeerForLog(peerID)} failed: ${e.message}")
+            } finally {
+                overflowPermits.release()
             }
         }
     }
@@ -262,14 +297,13 @@ class PacketProcessor(private val myPeerID: String) {
         return buildString {
             appendLine("=== Packet Processor Debug Info ===")
             appendLine("Processor Scope Active: ${processorScope.isActive}")
-            appendLine("Active Peer Actors: ${actors.size}")
+            appendLine("Active Peer Actors: ${synchronized(actorsLock) { actors.size }}")
             appendLine("My Peer ID: $myPeerID")
             
-            if (actors.isNotEmpty()) {
+            val keys = synchronized(actorsLock) { actors.keys.toList() }
+            if (keys.isNotEmpty()) {
                 appendLine("Peer Actors:")
-                actors.keys.forEach { peerID ->
-                    appendLine("  - $peerID")
-                }
+                keys.forEach { peerID -> appendLine("  - $peerID") }
             }
         }
     }
@@ -278,13 +312,13 @@ class PacketProcessor(private val myPeerID: String) {
      * Shutdown the processor and all peer actors
      */
     fun shutdown() {
-        Log.d(TAG, "Shutting down PacketProcessor and ${actors.size} peer actors")
+        Log.d(TAG, "Shutting down PacketProcessor and ${synchronized(actorsLock) { actors.size }} peer actors")
         
         // Close all peer actors gracefully
-        actors.values.forEach { actor ->
-            actor.close()
+        synchronized(actorsLock) {
+            actors.values.forEach { actor -> actor.close() }
+            actors.clear()
         }
-        actors.clear()
         
         // Shutdown the relay manager
         packetRelayManager.shutdown()
