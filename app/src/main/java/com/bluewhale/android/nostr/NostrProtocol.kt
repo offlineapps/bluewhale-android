@@ -83,7 +83,9 @@ object NostrProtocol {
                 }
             
             Log.v(TAG, "Successfully opened seal")
-            
+
+            if (!sealAuthenticatesRumor(giftWrap, seal, rumor)) return null
+
             Triple(rumor.content, rumor.pubkey, rumor.createdAt)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to decrypt private message: ${e.message}")
@@ -236,7 +238,37 @@ object NostrProtocol {
     }
     
     // MARK: - Private Methods
-    
+
+    /**
+     * The rumor is unsigned by design (NIP-59), so the only thing that attests to its
+     * author is the seal wrapped around it. Decryption alone proves nothing: the seal is
+     * opened with the sender's own key, so anyone can seal a rumor that names someone
+     * else as its author. Establish authorship before the rumor is trusted.
+     */
+    private fun sealAuthenticatesRumor(
+        giftWrap: NostrEvent,
+        seal: NostrEvent,
+        rumor: NostrEvent
+    ): Boolean {
+        if (giftWrap.kind != NostrKind.GIFT_WRAP) {
+            Log.w(TAG, "Rejecting NIP-17 message: outer event is kind ${giftWrap.kind}, expected ${NostrKind.GIFT_WRAP}")
+            return false
+        }
+        if (seal.kind != NostrKind.SEAL) {
+            Log.w(TAG, "Rejecting NIP-17 message: seal is kind ${seal.kind}, expected ${NostrKind.SEAL}")
+            return false
+        }
+        if (!seal.pubkey.equals(rumor.pubkey, ignoreCase = true)) {
+            Log.w(TAG, "Rejecting NIP-17 message: rumor claims an author the seal was not signed by")
+            return false
+        }
+        if (!seal.isValidSignature()) {
+            Log.w(TAG, "Rejecting NIP-17 message: seal signature is missing or invalid")
+            return false
+        }
+        return true
+    }
+
     private fun createSeal(
         rumor: NostrEvent,
         recipientPubkey: String,
