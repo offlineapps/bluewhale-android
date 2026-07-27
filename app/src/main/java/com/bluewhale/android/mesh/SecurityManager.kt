@@ -102,28 +102,19 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
         // Skip our own handshake messages
         if (peerID == myPeerID) return false
 
-        // If we already have an established session but the peer is initiating a new handshake,
-        // drop the existing session so we can re-establish cleanly.
-        var forcedRehandshake = false
-        if (encryptionService.hasEstablishedSession(peerID)) {
-            Log.d(TAG, "Received new Noise handshake from $peerID with an existing session. Dropping old session to re-handshake.")
-            try {
-                encryptionService.removePeer(peerID)
-                forcedRehandshake = true
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to remove existing Noise session for $peerID: ${e.message}")
-            }
-        }
-        
+        // An existing session is never torn down here. Handshake packets carry no signature
+        // and the sender ID is only a claim, so anyone in range could otherwise drop the
+        // session between two peers by sending a byte of noise. A replacement is negotiated
+        // separately and only takes over once it actually completes.
         if (packet.payload.isEmpty()) {
             Log.w(TAG, "Noise handshake packet has empty payload")
             return false
         }
-        
+
         // Prevent duplicate handshake processing
         val exchangeKey = "$peerID-${packet.payload.sliceArray(0 until minOf(16, packet.payload.size)).contentHashCode()}"
-        
-        if (!forcedRehandshake && processedKeyExchanges.contains(exchangeKey)) {
+
+        if (processedKeyExchanges.contains(exchangeKey)) {
             Log.d(TAG, "Already processed handshake: $exchangeKey")
             return false
         }

@@ -16,6 +16,10 @@ class NoiseSessionManager(
     }
     
     private val sessions = ConcurrentHashMap<String, NoiseSession>()
+
+    // Handshakes negotiated while a session is already live. Kept apart so an unfinished
+    // or forged attempt cannot disturb the session that is currently working.
+    private val candidateSessions = ConcurrentHashMap<String, NoiseSession>()
     
     // Callbacks
     var onSessionEstablished: ((String, ByteArray) -> Unit)? = null
@@ -45,6 +49,7 @@ class NoiseSessionManager(
     fun removeSession(peerID: String) {
         sessions[peerID]?.destroy()
         sessions.remove(peerID)
+        candidateSessions.remove(peerID)?.destroy()
         Log.d(TAG, "Removed session for $peerID")
     }
     
@@ -54,7 +59,8 @@ class NoiseSessionManager(
     fun initiateHandshake(peerID: String): ByteArray {
         Log.d(TAG, "initiateHandshake($peerID)")
 
-        // Remove any existing session first
+        // Remove any existing session first. This path is a local decision, not something
+        // a remote packet can trigger.
         removeSession(peerID)
         
         // Create new session as initiator
@@ -78,29 +84,39 @@ class NoiseSessionManager(
     }
     
     /**
-     * Handle incoming handshake message
+     * Handle incoming handshake message.
+     *
+     * While a session is already established, the incoming handshake is negotiated in a
+     * separate candidate session and only replaces the live one once it completes. A
+     * handshake packet is unsigned and its sender ID is only a claim, so treating one as a
+     * reason to discard a working session would let anyone in range cut two peers off from
+     * each other. A peer that genuinely lost its state still recovers, because its
+     * handshake runs to completion in the candidate and is promoted.
      */
     fun processHandshakeMessage(peerID: String, message: ByteArray): ByteArray? {
         Log.d(TAG, "processHandshakeMessage($peerID, ${message.size} bytes)")
-        
+
+        val replacing = sessions[peerID]?.isEstablished() == true
+        val store = if (replacing) candidateSessions else sessions
+
         try {
-            var session = getSession(peerID)
-            
+            var session = store[peerID]
+
             // If no session exists, create one as responder
             if (session == null) {
-                Log.d(TAG, "Creating new RESPONDER session for $peerID")
+                Log.d(TAG, "Creating new RESPONDER session for $peerID (candidate=$replacing)")
                 session = NoiseSession(
                     peerID = peerID,
                     isInitiator = false,
                     localStaticPrivateKey = localStaticPrivateKey,
                     localStaticPublicKey = localStaticPublicKey
                 )
-                addSession(peerID, session)
+                store[peerID] = session
             }
-            
+
             // Process handshake message
             val response = session.processHandshakeMessage(message)
-            
+
             // Check if session is established
             if (session.isEstablished()) {
                 val remoteStaticKey = session.getRemoteStaticPublicKey()
@@ -108,21 +124,32 @@ class NoiseSessionManager(
                     // The handshake proves possession of the remote static key, so the peer
                     // ID it is claiming must be the one that key derives to.
                     if (!NoisePeerIdentity.matchesClaimedPeerID(peerID, remoteStaticKey)) {
-                        Log.w(TAG, "Dropping session: $peerID is not the peer ID its static key derives to")
-                        removeSession(peerID)
+                        Log.w(TAG, "Dropping handshake: $peerID is not the peer ID its static key derives to")
+                        // Only the attempt is discarded. Reaching past the candidate to the
+                        // live session here would hand back the same denial of service, to
+                        // anyone able to complete a handshake under a mismatched peer ID.
+                        store.remove(peerID)?.destroy()
                         return null
+                    }
+                    if (replacing) {
+                        Log.d(TAG, "Promoting candidate session for $peerID over the established one")
+                        sessions[peerID]?.destroy()
+                        sessions[peerID] = session
+                        candidateSessions.remove(peerID)
                     }
                     Log.d(TAG, "Session established with $peerID")
                     onSessionEstablished?.invoke(peerID, remoteStaticKey)
                 }
             }
-            
+
             return response
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Handshake failed with $peerID: ${e.message}")
-            sessions.remove(peerID)
-            onSessionFailed?.invoke(peerID, e)
+            // Only the attempt is discarded. An established session stays untouched so a
+            // failed or forged handshake cannot take it away.
+            store.remove(peerID)?.destroy()
+            if (!replacing) onSessionFailed?.invoke(peerID, e)
             throw e
         }
     }
@@ -217,6 +244,8 @@ class NoiseSessionManager(
     fun shutdown() {
         sessions.values.forEach { it.destroy() }
         sessions.clear()
+        candidateSessions.values.forEach { it.destroy() }
+        candidateSessions.clear()
         Log.d(TAG, "Noise session manager shut down")
     }
 }
