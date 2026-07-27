@@ -496,6 +496,14 @@ class BluetoothMeshService(private val context: Context) {
                             connectionManager.addressPeerMap[deviceAddress] = pid
                             Log.d(TAG, "Mapped device $deviceAddress to peer $pid (TTL=${routed.packet.ttl})")
 
+                            // Scanning cannot spot a device we already hold a link to,
+                            // because the value it advertises rotates. Two links to one
+                            // peer are only visible once it has announced on both.
+                            connectionManager.redundantAddressesForPeer(pid).forEach { redundant ->
+                                Log.d(TAG, "Dropping redundant link to $pid at $redundant")
+                                connectionManager.disconnectAddress(redundant)
+                            }
+
                             // Mark as directly connected - refresh UI state
                             try { peerManager.refreshPeerList() } catch (_: Exception) { }
 

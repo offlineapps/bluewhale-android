@@ -88,6 +88,9 @@ class BluetoothConnectionManager(
     // Public property for address-peer mapping
     val addressPeerMap get() = connectionTracker.addressPeerMap
 
+    fun redundantAddressesForPeer(peerID: String): List<String> =
+        connectionTracker.redundantAddressesForPeer(peerID)
+
     init {
         powerManager.delegate = this
         // Observe debug settings to enforce role state while active

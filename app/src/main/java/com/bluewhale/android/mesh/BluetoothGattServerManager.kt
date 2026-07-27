@@ -397,10 +397,6 @@ class BluetoothGattServerManager(
         }
     }
     
-    /**
-     * Stop advertising
-     */
-    @Suppress("DEPRECATION")
     /** Re-advertises when the rotating value changes. */
     private fun scheduleAdvertisementRotation() {
         rotationJob?.cancel()
@@ -410,6 +406,10 @@ class BluetoothGattServerManager(
         }
     }
 
+    /**
+     * Stop advertising
+     */
+    @Suppress("DEPRECATION")
     private fun stopAdvertising() {
         if (!permissionManager.hasBluetoothPermissions() || bleAdvertiser == null) return
         try {
