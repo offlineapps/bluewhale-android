@@ -200,7 +200,7 @@ class BluetoothMeshService(private val context: Context) {
                 // Send announcement and cached messages after key exchange
                 serviceScope.launch {
                     Log.d(TAG, "Key exchange completed with $peerID; sending follow-ups")
-                    sendPeerIdentity(peerID)
+                    sendPeerState(peerID)
                     delay(100)
                     sendAnnouncementToPeer(peerID)
 
@@ -1324,16 +1324,21 @@ class BluetoothMeshService(private val context: Context) {
     }
     
     /**
-     * Tells a peer which Ed25519 signing key belongs to this device. It travels inside the
+     * Tells a peer which Ed25519 signing key and capabilities belong to this device. It
+     * travels inside the
      * Noise session, so the receiver can attribute it to the static key the handshake
      * authenticated rather than to an announce anybody could have written.
      */
-    private fun sendPeerIdentity(peerID: String) {
+    private fun sendPeerState(peerID: String) {
         try {
             val signingKey = encryptionService.getSigningPublicKey() ?: return
+            val state = com.bluewhale.android.model.PeerStatePayload(
+                capabilities = com.bluewhale.android.model.PeerStatePayload.CAPABILITY_PRIVATE_MEDIA,
+                signingPublicKey = signingKey
+            ).encode() ?: return
             val payload = com.bluewhale.android.model.NoisePayload(
-                type = com.bluewhale.android.model.NoisePayloadType.PEER_IDENTITY,
-                data = signingKey
+                type = com.bluewhale.android.model.NoisePayloadType.PEER_STATE,
+                data = state
             )
             val encrypted = securityManager.encryptForPeer(payload.encode(), peerID) ?: return
             val packet = BluewhalePacket(
@@ -1348,7 +1353,7 @@ class BluetoothMeshService(private val context: Context) {
             )
             connectionManager.broadcastPacket(RoutedPacket(packet))
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to send peer identity to $peerID: ${e.message}")
+            Log.w(TAG, "Failed to send peer state to $peerID: ${e.message}")
         }
     }
 

@@ -36,6 +36,14 @@ class SecureIdentityStateManager(private val context: Context) {
         private const val STATE_PROVISIONAL = "provisional"
         private const val STATE_CONTESTED = "contested"
         private const val STATE_AUTHENTICATED = "authenticated"
+
+        /**
+         * How long a contested binding keeps a peer unverified while waiting for a signing
+         * key proven over a Noise session. Bounded so a client that never sends peer state,
+         * including older bitchat and iOS builds, can never be silenced permanently by
+         * someone announcing its Noise key.
+         */
+        private const val CONTEST_TIMEOUT_MS = 10 * 60 * 1000L
     }
     
     private val prefs: SharedPreferences
@@ -286,7 +294,12 @@ class SecureIdentityStateManager(private val context: Context) {
      * contested: one of them is an impostor and there is no way to tell which from
      * announces alone, so neither is trusted until an authenticated one arrives.
      */
-    data class SigningKeyBinding(val signingKeyHex: String, val authenticated: Boolean, val contested: Boolean)
+    data class SigningKeyBinding(
+        val signingKeyHex: String,
+        val authenticated: Boolean,
+        val contested: Boolean,
+        val recordedAtMs: Long = 0L
+    )
 
     fun getSigningKeyBinding(noiseKeyHex: String): SigningKeyBinding? {
         if (!isHex64(noiseKeyHex)) return null
@@ -294,7 +307,8 @@ class SecureIdentityStateManager(private val context: Context) {
         val parts = entry.substringAfter('=').split('|')
         val key = parts.getOrNull(0)?.takeIf { isHex64(it) } ?: return null
         val state = parts.getOrNull(1) ?: STATE_PROVISIONAL
-        return SigningKeyBinding(key, state == STATE_AUTHENTICATED, state == STATE_CONTESTED)
+        val recordedAt = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+        return SigningKeyBinding(key, state == STATE_AUTHENTICATED, state == STATE_CONTESTED, recordedAt)
     }
 
     /**
@@ -305,12 +319,18 @@ class SecureIdentityStateManager(private val context: Context) {
         val noiseKey = noiseKeyHex.lowercase()
         val signingKey = signingKeyHex.lowercase()
         synchronized(lock) {
-            val existing = getSigningKeyBinding(noiseKey)
+            val now = System.currentTimeMillis()
+            val stored = getSigningKeyBinding(noiseKey)
+            // A contest that nothing ever resolved is dropped, so the current announcer is
+            // trusted again rather than the peer staying unverified forever.
+            val existing = if (stored != null && stored.contested &&
+                now - stored.recordedAtMs > CONTEST_TIMEOUT_MS
+            ) null else stored
             val next = when {
-                existing == null -> SigningKeyBinding(signingKey, authenticated = false, contested = false)
+                existing == null -> SigningKeyBinding(signingKey, authenticated = false, contested = false, recordedAtMs = now)
                 existing.authenticated -> existing
                 existing.signingKeyHex == signingKey -> existing
-                else -> SigningKeyBinding(existing.signingKeyHex, authenticated = false, contested = true)
+                else -> SigningKeyBinding(existing.signingKeyHex, authenticated = false, contested = true, recordedAtMs = now)
             }
             if (next != existing) writeSigningKeyBinding(noiseKey, next)
             return next
@@ -326,7 +346,12 @@ class SecureIdentityStateManager(private val context: Context) {
         synchronized(lock) {
             writeSigningKeyBinding(
                 noiseKeyHex.lowercase(),
-                SigningKeyBinding(signingKeyHex.lowercase(), authenticated = true, contested = false)
+                SigningKeyBinding(
+                    signingKeyHex.lowercase(),
+                    authenticated = true,
+                    contested = false,
+                    recordedAtMs = System.currentTimeMillis()
+                )
             )
         }
     }
@@ -343,7 +368,7 @@ class SecureIdentityStateManager(private val context: Context) {
         }
         val current = prefs.getStringSet(KEY_SIGNING_KEY_BINDINGS, emptySet())?.toMutableSet() ?: mutableSetOf()
         current.removeAll { it.startsWith("$noiseKey=") }
-        current.add("$noiseKey=${binding.signingKeyHex}|$state")
+        current.add("$noiseKey=${binding.signingKeyHex}|$state|${binding.recordedAtMs}")
         prefs.edit { putStringSet(KEY_SIGNING_KEY_BINDINGS, current) }
     }
 

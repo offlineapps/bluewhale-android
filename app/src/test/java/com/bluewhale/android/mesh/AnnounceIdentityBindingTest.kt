@@ -5,6 +5,7 @@ import com.bluewhale.android.model.BluewhaleMessage
 import com.bluewhale.android.model.IdentityAnnouncement
 import com.bluewhale.android.model.NoisePayload
 import com.bluewhale.android.model.NoisePayloadType
+import com.bluewhale.android.model.PeerStatePayload
 import com.bluewhale.android.model.RoutedPacket
 import com.bluewhale.android.protocol.BluewhalePacket
 import com.bluewhale.android.protocol.MessageType
@@ -177,11 +178,12 @@ class AnnounceIdentityBindingTest {
     }
 
     /**
-     * Delivers a PEER_IDENTITY payload as it would arrive inside an established session,
+     * Delivers a PEER_STATE payload as it would arrive inside an established session,
      * where [noiseKey] is the static key the handshake authenticated.
      */
     private fun deliverPeerIdentity(peerID: String, noiseKey: ByteArray, signingKey: ByteArray) {
-        val payload = NoisePayload(NoisePayloadType.PEER_IDENTITY, signingKey).encode()
+        val state = PeerStatePayload(PeerStatePayload.CAPABILITY_PRIVATE_MEDIA, signingKey).encode()!!
+        val payload = NoisePayload(NoisePayloadType.PEER_STATE, state).encode()
         val myPeerID = "00000000deadbeef"
         val handler = MessageHandler(myPeerID, ApplicationProvider.getApplicationContext())
         handler.delegate = RecordingDelegate(authenticatedNoiseKey = noiseKey, decrypted = payload)

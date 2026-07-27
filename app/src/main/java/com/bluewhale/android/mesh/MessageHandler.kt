@@ -162,8 +162,8 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                     // Simplified: Call delegate with messageID and peerID directly
                     delegate?.onReadReceiptReceived(messageID, peerID)
                 }
-                com.bluewhale.android.model.NoisePayloadType.PEER_IDENTITY -> {
-                    handleAuthenticatedPeerIdentity(peerID, noisePayload.data)
+                com.bluewhale.android.model.NoisePayloadType.PEER_STATE -> {
+                    handleAuthenticatedPeerState(peerID, noisePayload.data)
                 }
                 com.bluewhale.android.model.NoisePayloadType.VERIFY_CHALLENGE -> {
                     Log.d(TAG, "🔐 Verify challenge received from $peerID (${noisePayload.data.size} bytes)")
@@ -183,15 +183,18 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     /**
      * A signing key that arrives inside an established Noise session is proven to come
      * from the holder of that session's static key, which an announced one is not.
+     * Payload type 0x21, shared with bitchat and iOS.
      */
-    private fun handleAuthenticatedPeerIdentity(peerID: String, signingPublicKey: ByteArray) {
-        if (signingPublicKey.size != 32) {
-            Log.w(TAG, "Ignoring peer identity from $peerID: signing key is ${signingPublicKey.size} bytes")
+    private fun handleAuthenticatedPeerState(peerID: String, payload: ByteArray) {
+        val state = com.bluewhale.android.model.PeerStatePayload.decode(payload)
+        if (state == null) {
+            Log.w(TAG, "Ignoring peer state from $peerID: malformed payload")
             return
         }
+        val signingPublicKey = state.signingPublicKey
         val noiseKey = delegate?.getAuthenticatedNoiseKey(peerID)
         if (noiseKey == null) {
-            Log.w(TAG, "Ignoring peer identity from $peerID: no established session to attribute it to")
+            Log.w(TAG, "Ignoring peer state from $peerID: no established session to attribute it to")
             return
         }
         val noiseKeyHex = noiseKey.joinToString("") { "%02x".format(it) }
