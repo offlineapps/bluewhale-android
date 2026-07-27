@@ -23,7 +23,11 @@ class PacketProcessor(private val myPeerID: String) {
         // Bounds on state keyed by an unauthenticated peer ID.
         private const val MAX_TRACKED_PEERS = 256
         private const val MAX_QUEUED_PACKETS_PER_PEER = 512
+        private const val MAX_WAITING_OVERFLOW_SENDS = 256
     }
+
+    // Caps how many packets may be waiting on a full per-peer queue at once.
+    private val overflowPermits = kotlinx.coroutines.sync.Semaphore(MAX_WAITING_OVERFLOW_SENDS)
     
     // Delegate for callbacks
     var delegate: PacketProcessorDelegate? = null
@@ -98,8 +102,30 @@ class PacketProcessor(private val myPeerID: String) {
         
         // trySend rather than a launched send, so a peer flooding us costs a bounded
         // queue instead of an unbounded pile of waiting coroutines.
-        if (!actor.trySend(routed).isSuccess) {
-            Log.w(TAG, "Dropping packet from ${formatPeerForLog(peerID)}: queue full or closed")
+        val result = actor.trySend(routed)
+        if (result.isSuccess) return
+
+        if (result.isClosed) {
+            Log.d(TAG, "Actor for ${formatPeerForLog(peerID)} was closed, dropping packet")
+            return
+        }
+
+        // A full queue is not on its own a reason to lose the packet. Fragments are
+        // reassembled from a complete run, so silently dropping one mid burst strands the
+        // whole transfer. The waiting send is allowed but the number of waiters is capped,
+        // which keeps the bound this class exists to provide.
+        if (!overflowPermits.tryAcquire()) {
+            Log.w(TAG, "Dropping packet from ${formatPeerForLog(peerID)}: overflow capacity reached")
+            return
+        }
+        processorScope.launch {
+            try {
+                actor.send(routed)
+            } catch (e: Exception) {
+                Log.d(TAG, "Overflow send for ${formatPeerForLog(peerID)} failed: ${e.message}")
+            } finally {
+                overflowPermits.release()
+            }
         }
     }
     

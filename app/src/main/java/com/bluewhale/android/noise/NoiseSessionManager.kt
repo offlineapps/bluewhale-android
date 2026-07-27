@@ -166,12 +166,18 @@ class NoiseSessionManager(
      * Drops the oldest handshake that never completed, to make room for a new one.
      */
     private fun hasRoomForNewHandshake(): Boolean {
-        val handshaking = sessions.filterValues { !it.isEstablished() }
+        // Candidates are handshakes in progress too, and they are created straight off an
+        // unauthenticated packet, so counting only `sessions` would exempt them from the
+        // bound entirely.
+        val handshaking = sessions.filterValues { !it.isEstablished() } + candidateSessions
         if (handshaking.size < MAX_HANDSHAKING_SESSIONS) return true
 
         val oldest = handshaking.minByOrNull { it.value.getCreationTime() } ?: return false
         Log.d(TAG, "Evicting stale handshake with ${oldest.key}")
-        sessions.remove(oldest.key)?.destroy()
+        if (candidateSessions.remove(oldest.key) == null) {
+            sessions.remove(oldest.key)
+        }
+        oldest.value.destroy()
         return true
     }
 
@@ -249,6 +255,7 @@ class NoiseSessionManager(
     fun getDebugInfo(): String = buildString {
         appendLine("=== Noise Session Manager Debug ===")
         appendLine("Active sessions: ${sessions.size}")
+        appendLine("Candidate sessions: ${candidateSessions.size}")
         appendLine("")
         
         if (sessions.isNotEmpty()) {
