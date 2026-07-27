@@ -311,16 +311,23 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         }
         if (binding != null && binding.contested) {
             // Two signing keys have been announced for this Noise key, so one of them is an
-            // impostor and announces cannot say which. Keep the peer visible but unverified,
-            // which stops public messages being attributed to it, until a session settles it.
+            // impostor and announces cannot say which. Drop the peer to unverified, which
+            // stops public messages being attributed to it, until a session settles it.
+            //
+            // The announcer's own nickname and signing key are deliberately not written
+            // here. Anyone can replay a peer's public Noise key under a signing key of
+            // their own, and adopting it would replace the real peer's recorded key, so
+            // its genuinely signed packets would start failing verification.
             Log.w(TAG, "Announce from ${peerID.take(8)} is contested: recording as unverified")
-            delegate?.updatePeerInfo(
-                peerID = peerID,
-                nickname = announcement.nickname,
-                noisePublicKey = announcement.noisePublicKey,
-                signingPublicKey = announcement.signingPublicKey,
-                isVerified = false
-            )
+            if (existingPeer?.noisePublicKey != null && existingPeer.signingPublicKey != null) {
+                delegate?.updatePeerInfo(
+                    peerID = peerID,
+                    nickname = existingPeer.nickname,
+                    noisePublicKey = existingPeer.noisePublicKey!!,
+                    signingPublicKey = existingPeer.signingPublicKey!!,
+                    isVerified = false
+                )
+            }
             return false
         }
 
