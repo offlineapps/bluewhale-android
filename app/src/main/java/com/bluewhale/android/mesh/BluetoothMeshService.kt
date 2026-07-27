@@ -1055,7 +1055,7 @@ class BluetoothMeshService(private val context: Context) {
             // Append gossip TLV containing up to 10 direct neighbors (compact IDs)
             try {
                 val directPeers = getDirectPeerIDsForGossip()
-                if (directPeers.isNotEmpty()) {
+                if (directPeers.isNotEmpty() && isNeighborGossipEnabled()) {
                     val gossip = com.bluewhale.android.services.meshgraph.GossipTLV.encodeNeighbors(directPeers)
                     tlvPayload = tlvPayload + gossip
                 }
@@ -1120,7 +1120,7 @@ class BluetoothMeshService(private val context: Context) {
         // Append gossip TLV containing up to 10 direct neighbors (compact IDs)
         try {
             val directPeers = getDirectPeerIDsForGossip()
-            if (directPeers.isNotEmpty()) {
+            if (directPeers.isNotEmpty() && isNeighborGossipEnabled()) {
                 val gossip = com.bluewhale.android.services.meshgraph.GossipTLV.encodeNeighbors(directPeers)
                 tlvPayload = tlvPayload + gossip
             }
@@ -1152,6 +1152,14 @@ class BluetoothMeshService(private val context: Context) {
         // Track announce for sync
         try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
     }
+
+    /**
+     * Whether to tell the mesh who our direct neighbours are. Off unless turned on in
+     * debug settings, since it maps physical proximity for anyone listening.
+     */
+    private fun isNeighborGossipEnabled(): Boolean = try {
+        com.bluewhale.android.ui.debug.DebugPreferenceManager.getGossipNeighborsEnabled()
+    } catch (_: Exception) { false }
 
     /**
      * Collect up to 10 direct neighbors for gossip TLV.

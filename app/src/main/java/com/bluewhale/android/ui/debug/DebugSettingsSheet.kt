@@ -103,6 +103,7 @@ fun DebugSettingsSheet(
     val gattServerEnabled by manager.gattServerEnabled.collectAsState()
     val gattClientEnabled by manager.gattClientEnabled.collectAsState()
     val packetRelayEnabled by manager.packetRelayEnabled.collectAsState()
+    val gossipNeighborsEnabled by manager.gossipNeighborsEnabled.collectAsState()
     val maxOverall by manager.maxConnectionsOverall.collectAsState()
     val maxServer by manager.maxServerConnections.collectAsState()
     val maxClient by manager.maxClientConnections.collectAsState()
@@ -287,6 +288,20 @@ fun DebugSettingsSheet(
                             Text(stringResource(R.string.debug_packet_relay), fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.weight(1f))
                             Switch(checked = packetRelayEnabled, onCheckedChange = { manager.setPacketRelayEnabled(it) })
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Filled.PowerSettingsNew, contentDescription = null, tint = Color(0xFFFF9500))
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(R.string.debug_gossip_neighbors), fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    stringResource(R.string.debug_gossip_neighbors_hint),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                            }
+                            Switch(checked = gossipNeighborsEnabled, onCheckedChange = { manager.setGossipNeighborsEnabled(it) })
                         }
                         // Removed aggregate labels; we will show per-direction compact labels below titles
                         // Toggle: overall vs per-connection vs per-peer

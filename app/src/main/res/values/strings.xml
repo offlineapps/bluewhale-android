@@ -265,6 +265,8 @@
   <string name="debug_overall_connections_fmt">connections: %1$d / %2$d</string>
   <string name="debug_max_overall">max overall</string>
   <string name="debug_packet_relay">packet relay</string>
+  <string name="debug_gossip_neighbors">gossip neighbours</string>
+  <string name="debug_gossip_neighbors_hint">shares who is next to you, so routing and the mesh graph can use it</string>
   <string name="debug_since_start_fmt">since start: %1$d</string>
   <string name="debug_roles_hint">turn roles on/off and close all connections when disabled</string>
   <string name="debug_sync_settings">sync settings</string>
