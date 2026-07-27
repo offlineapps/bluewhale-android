@@ -13,6 +13,10 @@ class NoiseSessionManager(
     
     companion object {
         private const val TAG = "NoiseSessionManager"
+
+        // A handshake is unauthenticated until it completes, and its peer ID is only a
+        // claim, so the number of half open sessions is bounded.
+        private const val MAX_HANDSHAKING_SESSIONS = 32
     }
     
     private val sessions = ConcurrentHashMap<String, NoiseSession>()
@@ -104,6 +108,10 @@ class NoiseSessionManager(
 
             // If no session exists, create one as responder
             if (session == null) {
+                if (!hasRoomForNewHandshake()) {
+                    Log.w(TAG, "Refusing handshake from $peerID: too many in progress")
+                    return null
+                }
                 Log.d(TAG, "Creating new RESPONDER session for $peerID (candidate=$replacing)")
                 session = NoiseSession(
                     peerID = peerID,
@@ -154,6 +162,19 @@ class NoiseSessionManager(
         }
     }
     
+    /**
+     * Drops the oldest handshake that never completed, to make room for a new one.
+     */
+    private fun hasRoomForNewHandshake(): Boolean {
+        val handshaking = sessions.filterValues { !it.isEstablished() }
+        if (handshaking.size < MAX_HANDSHAKING_SESSIONS) return true
+
+        val oldest = handshaking.minByOrNull { it.value.getCreationTime() } ?: return false
+        Log.d(TAG, "Evicting stale handshake with ${oldest.key}")
+        sessions.remove(oldest.key)?.destroy()
+        return true
+    }
+
     /**
      * SIMPLIFIED: Encrypt data
      */
