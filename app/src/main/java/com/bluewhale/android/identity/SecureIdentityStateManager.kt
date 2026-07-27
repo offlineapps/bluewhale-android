@@ -32,6 +32,10 @@ class SecureIdentityStateManager(private val context: Context) {
         private const val KEY_CACHED_PEER_NOISE_KEYS = "cached_peer_noise_keys"
         private const val KEY_CACHED_NOISE_FINGERPRINTS = "cached_noise_fingerprints"
         private const val KEY_CACHED_FINGERPRINT_NICKNAMES = "cached_fingerprint_nicknames"
+        private const val KEY_SIGNING_KEY_BINDINGS = "signing_key_bindings"
+        private const val STATE_PROVISIONAL = "provisional"
+        private const val STATE_CONTESTED = "contested"
+        private const val STATE_AUTHENTICATED = "authenticated"
     }
     
     private val prefs: SharedPreferences
@@ -269,6 +273,81 @@ class SecureIdentityStateManager(private val context: Context) {
             prefs.edit { putStringSet(KEY_CACHED_NOISE_FINGERPRINTS, current) }
         }
     }
+
+    /**
+     * Which signing key belongs with a Noise key.
+     *
+     * An announce proves only that whoever wrote it holds the signing key inside it, so a
+     * signing key learned that way is provisional. A signing key delivered inside an
+     * established Noise session is proven to come from the holder of the Noise private key,
+     * so it is authoritative and replaces anything provisional.
+     *
+     * If two different signing keys are ever announced for one Noise key, the binding is
+     * contested: one of them is an impostor and there is no way to tell which from
+     * announces alone, so neither is trusted until an authenticated one arrives.
+     */
+    data class SigningKeyBinding(val signingKeyHex: String, val authenticated: Boolean, val contested: Boolean)
+
+    fun getSigningKeyBinding(noiseKeyHex: String): SigningKeyBinding? {
+        if (!isHex64(noiseKeyHex)) return null
+        val entry = signingKeyEntry(noiseKeyHex.lowercase()) ?: return null
+        val parts = entry.substringAfter('=').split('|')
+        val key = parts.getOrNull(0)?.takeIf { isHex64(it) } ?: return null
+        val state = parts.getOrNull(1) ?: STATE_PROVISIONAL
+        return SigningKeyBinding(key, state == STATE_AUTHENTICATED, state == STATE_CONTESTED)
+    }
+
+    /**
+     * Records a signing key seen in an announce. Returns the resulting binding.
+     */
+    fun recordAnnouncedSigningKey(noiseKeyHex: String, signingKeyHex: String): SigningKeyBinding? {
+        if (!isHex64(noiseKeyHex) || !isHex64(signingKeyHex)) return null
+        val noiseKey = noiseKeyHex.lowercase()
+        val signingKey = signingKeyHex.lowercase()
+        synchronized(lock) {
+            val existing = getSigningKeyBinding(noiseKey)
+            val next = when {
+                existing == null -> SigningKeyBinding(signingKey, authenticated = false, contested = false)
+                existing.authenticated -> existing
+                existing.signingKeyHex == signingKey -> existing
+                else -> SigningKeyBinding(existing.signingKeyHex, authenticated = false, contested = true)
+            }
+            if (next != existing) writeSigningKeyBinding(noiseKey, next)
+            return next
+        }
+    }
+
+    /**
+     * Records a signing key proven through an established Noise session with the holder
+     * of [noiseKeyHex]. Overrides any provisional or contested binding.
+     */
+    fun recordAuthenticatedSigningKey(noiseKeyHex: String, signingKeyHex: String) {
+        if (!isHex64(noiseKeyHex) || !isHex64(signingKeyHex)) return
+        synchronized(lock) {
+            writeSigningKeyBinding(
+                noiseKeyHex.lowercase(),
+                SigningKeyBinding(signingKeyHex.lowercase(), authenticated = true, contested = false)
+            )
+        }
+    }
+
+    private fun signingKeyEntry(noiseKey: String): String? =
+        prefs.getStringSet(KEY_SIGNING_KEY_BINDINGS, emptySet())
+            ?.firstOrNull { it.startsWith("$noiseKey=") }
+
+    private fun writeSigningKeyBinding(noiseKey: String, binding: SigningKeyBinding) {
+        val state = when {
+            binding.authenticated -> STATE_AUTHENTICATED
+            binding.contested -> STATE_CONTESTED
+            else -> STATE_PROVISIONAL
+        }
+        val current = prefs.getStringSet(KEY_SIGNING_KEY_BINDINGS, emptySet())?.toMutableSet() ?: mutableSetOf()
+        current.removeAll { it.startsWith("$noiseKey=") }
+        current.add("$noiseKey=${binding.signingKeyHex}|$state")
+        prefs.edit { putStringSet(KEY_SIGNING_KEY_BINDINGS, current) }
+    }
+
+    private fun isHex64(value: String) = value.matches(Regex("^[a-fA-F0-9]{64}$"))
 
     fun getCachedFingerprintNickname(fingerprint: String): String? {
         if (!isValidFingerprint(fingerprint)) return null

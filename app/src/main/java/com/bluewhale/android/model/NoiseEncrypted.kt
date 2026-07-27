@@ -23,6 +23,7 @@ enum class NoisePayloadType(val value: UByte) {
     DELIVERED(0x03u),           // Message was delivered
     VERIFY_CHALLENGE(0x10u),    // Verification challenge
     VERIFY_RESPONSE(0x11u),     // Verification response
+    PEER_IDENTITY(0x12u),       // Sender's Ed25519 signing key, proven by the session it arrives in
     FILE_TRANSFER(0x20u);
 
 

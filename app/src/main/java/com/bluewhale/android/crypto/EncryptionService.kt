@@ -256,6 +256,14 @@ open class EncryptionService(private val context: Context) {
     }
     
     /**
+     * Get a peer's Noise static public key, available only once the handshake has
+     * authenticated it.
+     */
+    fun getPeerStaticPublicKey(peerID: String): ByteArray? {
+        return noiseService.getPeerPublicKeyData(peerID)
+    }
+
+    /**
      * Get current peer ID for a fingerprint (for peer ID rotation)
      */
     fun getCurrentPeerID(fingerprint: String): String? {
