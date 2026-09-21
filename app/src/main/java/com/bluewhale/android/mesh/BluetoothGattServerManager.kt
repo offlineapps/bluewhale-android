@@ -229,7 +229,7 @@ class BluetoothGattServerManager(
                         delegate?.onPacketReceived(packet, peerID, device)
                     } else {
                         Log.w(TAG, "Server: Failed to parse packet from ${device.address}, size: ${value.size} bytes")
-                        Log.w(TAG, "Server: Packet data: ${value.joinToString(" ") { "%02x".format(it) }}")
+                        Log.d(TAG, "Server: Packet data: ${value.joinToString(" ") { "%02x".format(it) }}")
                     }
                     
                     if (responseNeeded) {
