@@ -42,3 +42,12 @@
 -keepclassmembers class * implements android.location.LocationListener {
     public <methods>;
 }
+
+# Strip verbose, debug, and info logging from release builds so packet contents,
+# peer identifiers, and key material never reach logcat on a shipped app. Warnings
+# and errors are kept for field diagnostics.
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}

@@ -83,7 +83,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                     // Decode TLV private message exactly like iOS
                     val privateMessage = com.bluewhale.android.model.PrivateMessagePacket.decode(noisePayload.data)
                     if (privateMessage != null) {
-                        Log.d(TAG, "🔓 Decrypted TLV PM from $peerID: ${privateMessage.content.take(30)}...")
+                        Log.d(TAG, "🔓 Decrypted TLV PM from $peerID (${privateMessage.content.length} chars)")
 
                         // Handle favorite/unfavorite notifications embedded as PMs
                         val pmContent = privateMessage.content
@@ -120,7 +120,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                     // Handle encrypted file transfer; generate unique message ID
                     val file = com.bluewhale.android.model.BluewhaleFilePacket.decode(noisePayload.data)
                     if (file != null) {
-                        Log.d(TAG, "🔓 Decrypted encrypted file from $peerID: name='${file.fileName}', size=${file.fileSize}, mime='${file.mimeType}'")
+                        Log.d(TAG, "🔓 Decrypted encrypted file from $peerID (size=${file.fileSize}, mime='${file.mimeType}')")
                         val uniqueMsgId = java.util.UUID.randomUUID().toString().uppercase()
                         val savedPath = com.bluewhale.android.features.file.FileUtils.saveIncomingFile(appContext, file)
                         val message = BluewhaleMessage(
