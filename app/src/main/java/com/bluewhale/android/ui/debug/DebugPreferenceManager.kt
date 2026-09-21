@@ -21,6 +21,11 @@ object DebugPreferenceManager {
     // GCS keys (no migration/back-compat)
     private const val KEY_GCS_MAX_BYTES = "gcs_max_filter_bytes"
     private const val KEY_GCS_FPR = "gcs_filter_fpr_percent"
+    // Simulated peers (debug only, local injection)
+    private const val KEY_SIM_ENABLED = "sim_peers_enabled"
+    private const val KEY_SIM_COUNT = "sim_peers_count"
+    private const val KEY_SIM_INTERVAL_MS = "sim_peers_interval_ms"
+    private const val KEY_SIM_STRESS = "sim_peers_stress"
     // Removed: persistent notification toggle is now governed by MeshServicePreferences.isBackgroundEnabled
 
     private lateinit var prefs: SharedPreferences
@@ -109,6 +114,34 @@ object DebugPreferenceManager {
 
     fun setGcsFprPercent(value: Double) {
         if (ready()) prefs.edit().putLong(KEY_GCS_FPR, java.lang.Double.doubleToRawLongBits(value)).apply()
+    }
+
+    fun getSimulatedPeersEnabled(default: Boolean = false): Boolean =
+        if (ready()) prefs.getBoolean(KEY_SIM_ENABLED, default) else default
+
+    fun setSimulatedPeersEnabled(value: Boolean) {
+        if (ready()) prefs.edit().putBoolean(KEY_SIM_ENABLED, value).apply()
+    }
+
+    fun getSimulatedPeerCount(default: Int = 3): Int =
+        if (ready()) prefs.getInt(KEY_SIM_COUNT, default) else default
+
+    fun setSimulatedPeerCount(value: Int) {
+        if (ready()) prefs.edit().putInt(KEY_SIM_COUNT, value).apply()
+    }
+
+    fun getSimulatedIntervalMs(default: Int = 1500): Int =
+        if (ready()) prefs.getInt(KEY_SIM_INTERVAL_MS, default) else default
+
+    fun setSimulatedIntervalMs(value: Int) {
+        if (ready()) prefs.edit().putInt(KEY_SIM_INTERVAL_MS, value).apply()
+    }
+
+    fun getSimulatedStress(default: Boolean = false): Boolean =
+        if (ready()) prefs.getBoolean(KEY_SIM_STRESS, default) else default
+
+    fun setSimulatedStress(value: Boolean) {
+        if (ready()) prefs.edit().putBoolean(KEY_SIM_STRESS, value).apply()
     }
 
     // No longer storing persistent notification in debug prefs.

@@ -54,6 +54,16 @@ class BluetoothMeshService(private val context: Context) {
     private val messageHandler = MessageHandler(myPeerID, context.applicationContext)
     internal val connectionManager = BluetoothConnectionManager(context, myPeerID, fragmentManager) // Made internal for access
     private val packetProcessor = PacketProcessor(myPeerID)
+
+    // Debug only: feeds signed make believe traffic into the local pipeline. Never transmits.
+    private val simulatedPeerEngine by lazy {
+        SimulatedPeerEngine(serviceScope) { packet, peerID ->
+            packetProcessor.processPacket(RoutedPacket(packet, peerID, null))
+        }
+    }
+
+    // Live count of packets the simulated peer engine has injected, for the debug sheet.
+    val simulatedInjectedCount: kotlinx.coroutines.flow.StateFlow<Int> get() = simulatedPeerEngine.injectedCount
     private lateinit var gossipSyncManager: GossipSyncManager
     // Service-level notification manager for background (no-UI) DMs
     private val serviceNotificationManager = com.bluewhale.android.ui.NotificationManager(
@@ -118,9 +128,32 @@ class BluetoothMeshService(private val context: Context) {
             connectionManager.addressPeerMap.containsValue(peerID)
         }
         
+        setupSimulatedPeers()
         Log.d(TAG, "Delegates set up; GossipSyncManager initialized")
     }
     
+    private fun setupSimulatedPeers() {
+        val dbg = debugManager ?: return
+        serviceScope.launch {
+            kotlinx.coroutines.flow.combine(
+                dbg.simulatedPeersEnabled,
+                dbg.simulatedPeerCount,
+                dbg.simulatedIntervalMs,
+                dbg.simulatedStress
+            ) { enabled, count, interval, stress ->
+                arrayOf(enabled, count, interval, stress)
+            }.collect { cfg ->
+                if (terminated) return@collect
+                val enabled = cfg[0] as Boolean
+                if (enabled) {
+                    simulatedPeerEngine.start(cfg[1] as Int, (cfg[2] as Int).toLong(), cfg[3] as Boolean)
+                } else {
+                    simulatedPeerEngine.stop()
+                }
+            }
+        }
+    }
+
     /**
      * Start periodic debug logging every 10 seconds
      */
@@ -692,6 +725,7 @@ class BluetoothMeshService(private val context: Context) {
             securityManager.shutdown()
             storeForwardManager.shutdown()
             messageHandler.shutdown()
+            simulatedPeerEngine.stop()
             packetProcessor.shutdown()
             
             // Mark this instance as terminated and cancel its scope so it won't be reused

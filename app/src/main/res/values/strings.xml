@@ -269,6 +269,13 @@
   <string name="debug_gossip_neighbors_hint">shares who is next to you, so routing and the mesh graph can use it</string>
   <string name="debug_since_start_fmt">since start: %1$d</string>
   <string name="debug_roles_hint">turn roles on/off and close all connections when disabled</string>
+  <string name="debug_sim_peers">simulated peers</string>
+  <string name="debug_sim_peers_hint">inject signed make believe traffic into this device only, never sent over the air</string>
+  <string name="debug_sim_count_fmt">peers: %1$d</string>
+  <string name="debug_sim_interval_fmt">every %1$d ms</string>
+  <string name="debug_sim_stress">stress mode</string>
+  <string name="debug_sim_stress_hint">also floods duplicates and short lived peers to exercise dedup and per peer limits</string>
+  <string name="debug_sim_injected_fmt">injected packets: %1$d</string>
   <string name="debug_sync_settings">sync settings</string>
   <string name="debug_max_packets_per_sync_fmt">max packets per sync: %1$d</string>
   <string name="debug_max_gcs_filter_size_fmt">max GCS filter size: %1$d bytes (128–1024)</string>

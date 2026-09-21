@@ -43,6 +43,16 @@ class DebugSettingsManager private constructor() {
     private val _gossipNeighborsEnabled = MutableStateFlow(false)
     val gossipNeighborsEnabled: StateFlow<Boolean> = _gossipNeighborsEnabled.asStateFlow()
 
+    // Simulated peers (debug only, local packet injection)
+    private val _simulatedPeersEnabled = MutableStateFlow(false)
+    val simulatedPeersEnabled: StateFlow<Boolean> = _simulatedPeersEnabled.asStateFlow()
+    private val _simulatedPeerCount = MutableStateFlow(3)
+    val simulatedPeerCount: StateFlow<Int> = _simulatedPeerCount.asStateFlow()
+    private val _simulatedIntervalMs = MutableStateFlow(1500)
+    val simulatedIntervalMs: StateFlow<Int> = _simulatedIntervalMs.asStateFlow()
+    private val _simulatedStress = MutableStateFlow(false)
+    val simulatedStress: StateFlow<Boolean> = _simulatedStress.asStateFlow()
+
     // Visibility of the debug sheet; gates heavy work
     private val _debugSheetVisible = MutableStateFlow(false)
     val debugSheetVisible: StateFlow<Boolean> = _debugSheetVisible.asStateFlow()
@@ -64,6 +74,10 @@ class DebugSettingsManager private constructor() {
             _gattClientEnabled.value = DebugPreferenceManager.getGattClientEnabled(true)
             _packetRelayEnabled.value = DebugPreferenceManager.getPacketRelayEnabled(true)
             _gossipNeighborsEnabled.value = DebugPreferenceManager.getGossipNeighborsEnabled(false)
+            _simulatedPeersEnabled.value = DebugPreferenceManager.getSimulatedPeersEnabled(false)
+            _simulatedPeerCount.value = DebugPreferenceManager.getSimulatedPeerCount(3)
+            _simulatedIntervalMs.value = DebugPreferenceManager.getSimulatedIntervalMs(1500)
+            _simulatedStress.value = DebugPreferenceManager.getSimulatedStress(false)
             _maxConnectionsOverall.value = DebugPreferenceManager.getMaxConnectionsOverall(8)
             _maxServerConnections.value = DebugPreferenceManager.getMaxConnectionsServer(8)
             _maxClientConnections.value = DebugPreferenceManager.getMaxConnectionsClient(8)
@@ -276,6 +290,31 @@ class DebugSettingsManager private constructor() {
         addDebugMessage(DebugMessage.SystemMessage(
             if (enabled) "🕸️ Neighbor gossip enabled" else "🙈 Neighbor gossip disabled"
         ))
+    }
+
+    fun setSimulatedPeersEnabled(enabled: Boolean) {
+        DebugPreferenceManager.setSimulatedPeersEnabled(enabled)
+        _simulatedPeersEnabled.value = enabled
+        addDebugMessage(DebugMessage.SystemMessage(
+            if (enabled) "🤖 Simulated peers started" else "🛑 Simulated peers stopped"
+        ))
+    }
+
+    fun setSimulatedPeerCount(value: Int) {
+        val clamped = value.coerceIn(1, 32)
+        DebugPreferenceManager.setSimulatedPeerCount(clamped)
+        _simulatedPeerCount.value = clamped
+    }
+
+    fun setSimulatedIntervalMs(value: Int) {
+        val clamped = value.coerceIn(200, 10000)
+        DebugPreferenceManager.setSimulatedIntervalMs(clamped)
+        _simulatedIntervalMs.value = clamped
+    }
+
+    fun setSimulatedStress(enabled: Boolean) {
+        DebugPreferenceManager.setSimulatedStress(enabled)
+        _simulatedStress.value = enabled
     }
 
     fun setMaxConnectionsOverall(value: Int) {
