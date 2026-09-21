@@ -365,8 +365,11 @@ object BinaryProtocol {
                 buffer.getShort().toUShort().toUInt()  // 2 bytes for v1, convert to UInt
             }
 
-            // Calculate expected total size
-            var expectedSize = headerSize + SENDER_ID_SIZE + payloadLength.toInt()
+            // Calculate expected total size. payloadLength is attacker controlled and up
+            // to four bytes wide on v2, so the running total is kept in a Long. Folding it
+            // into an Int overflows expectedSize to a negative value, slips past the bounds
+            // check below, and lets a tiny frame drive a multi gigabyte ByteArray allocation.
+            var expectedSize: Long = headerSize.toLong() + SENDER_ID_SIZE + payloadLength.toLong()
             if (hasRecipient) expectedSize += RECIPIENT_ID_SIZE
             var routeCount = 0
             if (hasRoute) {
@@ -386,7 +389,7 @@ object BinaryProtocol {
             }
             if (hasSignature) expectedSize += SIGNATURE_SIZE
 
-            if (raw.size < expectedSize) return null
+            if (raw.size.toLong() < expectedSize) return null
             
             // SenderID
             val senderID = ByteArray(SENDER_ID_SIZE)
