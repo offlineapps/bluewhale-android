@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.SettingsEthernet
 import androidx.compose.material3.*
+import kotlin.math.roundToInt
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -104,6 +105,11 @@ fun DebugSettingsSheet(
     val gattClientEnabled by manager.gattClientEnabled.collectAsState()
     val packetRelayEnabled by manager.packetRelayEnabled.collectAsState()
     val gossipNeighborsEnabled by manager.gossipNeighborsEnabled.collectAsState()
+    val simulatedPeersEnabled by manager.simulatedPeersEnabled.collectAsState()
+    val simulatedPeerCount by manager.simulatedPeerCount.collectAsState()
+    val simulatedIntervalMs by manager.simulatedIntervalMs.collectAsState()
+    val simulatedStress by manager.simulatedStress.collectAsState()
+    val simulatedInjected by meshService.simulatedInjectedCount.collectAsState()
     val maxOverall by manager.maxConnectionsOverall.collectAsState()
     val maxServer by manager.maxServerConnections.collectAsState()
     val maxClient by manager.maxClientConnections.collectAsState()
@@ -269,6 +275,63 @@ fun DebugSettingsSheet(
                         }
                         Text(
                             stringResource(R.string.debug_roles_hint),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            color = colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+
+            // Simulated peers (debug only, local injection)
+            item {
+                Surface(shape = RoundedCornerShape(12.dp), color = colorScheme.surfaceVariant.copy(alpha = 0.2f)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Filled.BugReport, contentDescription = null, tint = Color(0xFF34C759))
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(R.string.debug_sim_peers), fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    stringResource(R.string.debug_sim_peers_hint),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                            }
+                            Switch(checked = simulatedPeersEnabled, onCheckedChange = { manager.setSimulatedPeersEnabled(it) })
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.debug_sim_count_fmt, simulatedPeerCount), fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.width(110.dp))
+                            Slider(
+                                value = simulatedPeerCount.toFloat(),
+                                onValueChange = { manager.setSimulatedPeerCount(it.roundToInt()) },
+                                valueRange = 1f..32f,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.debug_sim_interval_fmt, simulatedIntervalMs), fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.width(110.dp))
+                            Slider(
+                                value = simulatedIntervalMs.toFloat(),
+                                onValueChange = { manager.setSimulatedIntervalMs(it.roundToInt()) },
+                                valueRange = 200f..10000f,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(R.string.debug_sim_stress), fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    stringResource(R.string.debug_sim_stress_hint),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                            }
+                            Switch(checked = simulatedStress, onCheckedChange = { manager.setSimulatedStress(it) })
+                        }
+                        Text(
+                            stringResource(R.string.debug_sim_injected_fmt, simulatedInjected),
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp,
                             color = colorScheme.onSurface.copy(alpha = 0.7f)
