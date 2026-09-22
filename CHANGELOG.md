@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-22
+
+A privacy and denial of service release with a new debug tool for exercising the
+mesh from a single device. Both security fixes are reachable from unauthenticated
+Bluetooth traffic, so upgrading is recommended.
+
+### Security
+- The declared payload length of a v2 packet was added into a signed 32 bit size
+  calculation, so a value near the maximum overflowed the bounds check and let a
+  tiny frame drive a multi gigabyte allocation. The resulting out of memory error
+  is not caught, so any device in range could crash a peer with a single 24 byte
+  frame before any authentication. The length is now kept as a 64 bit value and
+  bounded by the bytes that actually arrived (#26).
+
+### Privacy
+- Release builds no longer keep verbose, debug, and info logging, so packet
+  contents, peer identifiers, and key material stay out of logcat on a shipped
+  app. The decrypted private message plaintext, the incoming file name, and the
+  raw packet hex dump that used to be logged are scrubbed at the source as well
+  (#27).
+
+### Added
+- A debug only simulated peers tool in the debug settings sheet. It spins up make
+  believe peers with their own keys that announce and broadcast into the local
+  pipeline, so identity binding, dedup, relay, and reassembly can be exercised
+  from one device. Injected packets carry a zero hop count and are never sent over
+  Bluetooth, and the whole tool is off by default (#28).
+
+
 ## [1.1.1] - 2026-07-28
 
 A security release. Every mesh-facing fix below is reachable from unauthenticated
