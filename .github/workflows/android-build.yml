@@ -2,6 +2,8 @@ name: Android CI
 
 on:
   workflow_dispatch:
+  # The release workflow runs these same checks before it builds and publishes anything
+  workflow_call:
   push:
     branches: [ "main", "develop" ]
   pull_request:
