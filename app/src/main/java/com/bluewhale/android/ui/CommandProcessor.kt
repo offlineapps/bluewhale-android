@@ -1,11 +1,14 @@
 package com.bluewhale.android.ui
 
+import com.bluewhale.android.ai.AiConversationMemory
+import com.bluewhale.android.ai.LlmBusyException
 import com.bluewhale.android.ai.LlmEngine
 import com.bluewhale.android.mesh.BluetoothMeshService
 import com.bluewhale.android.model.BluewhaleMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.util.Date
@@ -25,11 +28,17 @@ class CommandProcessor(
     companion object {
         // Covers first-use model load plus generation on slow devices
         private const val AI_INFERENCE_TIMEOUT_MS = 180_000L
+        private const val AI_USAGE = "usage: /ai <prompt> | /ai share | /ai stop | /ai reset"
+        internal const val AI_PRIVATE_HINT = "only you can see this answer. /ai share sends it to this chat."
     }
+
+    // /ai context per conversation; never leaves the device
+    private val aiMemory = AiConversationMemory()
+    private var aiJob: Job? = null
 
     // Available commands list
     private val baseCommands = listOf(
-        CommandSuggestion("/ai", emptyList(), "<prompt>", "ask the offline ai model"),
+        CommandSuggestion("/ai", emptyList(), "<prompt>", "ask the offline ai model (answer stays private)"),
         CommandSuggestion("/block", emptyList(), "[nickname]", "block or list blocked peers"),
         CommandSuggestion("/channels", emptyList(), null, "show all discovered channels"),
         CommandSuggestion("/clear", emptyList(), null, "clear chat messages"),
@@ -343,8 +352,31 @@ class CommandProcessor(
     ) {
         val prompt = parts.drop(1).joinToString(" ").trim()
         if (prompt.isEmpty()) {
-            postSystemMessage("usage: /ai <prompt>")
+            postSystemMessage(AI_USAGE)
             return
+        }
+
+        val target = captureConversationTarget()
+        when (prompt.lowercase()) {
+            "share" -> {
+                shareLastAiAnswer(target, meshService, myPeerID, onSendMessage)
+                return
+            }
+            "stop" -> {
+                val job = aiJob
+                if (job?.isActive == true) {
+                    job.cancel()
+                    postSystemMessage("ai: stopped.", target)
+                } else {
+                    postSystemMessage("ai: nothing to stop.", target)
+                }
+                return
+            }
+            "reset" -> {
+                aiMemory.clear(target.key)
+                postSystemMessage("ai: forgot this conversation.", target)
+                return
+            }
         }
 
         if (llmEngine == null || !llmEngine.isModelInstalled()) {
@@ -353,24 +385,32 @@ class CommandProcessor(
             return
         }
 
+        // One generation at a time: the model cannot run two, and queueing silently made a
+        // second question look like it had hung
+        if (aiJob?.isActive == true) {
+            postSystemMessage("ai is still answering the previous question. /ai stop cancels it.", target)
+            return
+        }
+
         // Inference takes seconds to minutes; the user may open another chat meanwhile.
         // Everything below must go to the conversation the command was typed into.
-        val target = captureConversationTarget()
+        val fullPrompt = aiMemory.buildPrompt(target.key, prompt, recentChatLines(target))
 
-        // Progress and failures stay on this device; only a successful answer is sent to peers.
+        // Answers stay on this device until the user explicitly shares them with /ai share
         postSystemMessage("ai: thinking…", target)
-        coroutineScope.launch {
-            // runCatching keeps a failed inference from cancelling the scope while the
-            // deferred is orphaned after a timeout
-            val pending = async { runCatching { llmEngine.complete(prompt) } }
-            val result = try {
-                withTimeout(AI_INFERENCE_TIMEOUT_MS) { pending.await() }
+        aiJob = coroutineScope.launch {
+            val reply = try {
+                // Cancelling on timeout also stops the engine, so it is free for the next question
+                withTimeout(AI_INFERENCE_TIMEOUT_MS) { llmEngine.complete(fullPrompt) }
             } catch (e: TimeoutCancellationException) {
-                postSystemMessage("ai timed out after ${AI_INFERENCE_TIMEOUT_MS / 1000}s.", target)
+                postSystemMessage("ai timed out after ${AI_INFERENCE_TIMEOUT_MS / 1000}s and was stopped.", target)
                 return@launch
-            }
-
-            val reply = result.getOrElse { e ->
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: LlmBusyException) {
+                postSystemMessage("ai: the model is still stopping the previous request. try again in a moment.", target)
+                return@launch
+            } catch (e: Exception) {
                 postSystemMessage("ai failed: ${e.message ?: e::class.java.simpleName}", target)
                 return@launch
             }
@@ -380,8 +420,45 @@ class CommandProcessor(
                 return@launch
             }
 
-            sendAsSelf(formatAiMessage(prompt, reply), target, meshService, myPeerID, onSendMessage)
+            aiMemory.record(target.key, prompt, reply)
+            postSystemMessage("ai: $reply", target)
+            postSystemMessage(AI_PRIVATE_HINT, target)
         }
+    }
+
+    private fun shareLastAiAnswer(
+        target: ConversationTarget,
+        meshService: BluetoothMeshService,
+        myPeerID: String,
+        onSendMessage: (String, List<String>, String?) -> Unit
+    ) {
+        val turn = aiMemory.lastTurn(target.key)
+        if (turn == null) {
+            postSystemMessage("ai: nothing to share in this conversation yet.", target)
+            return
+        }
+        sendAsSelf(formatAiMessage(turn.prompt, turn.reply), target, meshService, myPeerID, onSendMessage)
+    }
+
+    /** Recent messages of the target conversation, as background for the model. */
+    private fun recentChatLines(target: ConversationTarget): List<AiConversationMemory.ChatLine> {
+        val messages = when {
+            target.privatePeer != null -> state.getPrivateChatsValue()[target.privatePeer].orEmpty()
+            target.channel != null -> state.getChannelMessagesValue()[target.channel].orEmpty()
+            // Location channel timelines are not held in ChatState
+            target.isLocationChannel -> emptyList()
+            else -> state.getMessagesValue()
+        }
+        return messages
+            .filter { it.sender != "system" && it.content.isNotBlank() }
+            .takeLast(AiConversationMemory.MAX_CHAT_LINES)
+            .map { AiConversationMemory.ChatLine(it.sender, it.content) }
+    }
+
+    /** Forgets all /ai context, e.g. on panic. */
+    fun clearAiMemory() {
+        aiJob?.cancel()
+        aiMemory.clearAll()
     }
 
     /** Peers cannot tell generated text from typed text, so mark it. */
@@ -391,14 +468,28 @@ class CommandProcessor(
     private data class ConversationTarget(
         val privatePeer: String?,
         val channel: String?,
-        val isLocationChannel: Boolean
-    )
+        val isLocationChannel: Boolean,
+        val locationKey: String? = null
+    ) {
+        /** Identifies the conversation for /ai context and sharing. */
+        val key: String
+            get() = when {
+                privatePeer != null -> "pm:$privatePeer"
+                channel != null -> "ch:$channel"
+                isLocationChannel -> "geo:$locationKey"
+                else -> "mesh"
+            }
+    }
 
-    private fun captureConversationTarget() = ConversationTarget(
-        privatePeer = state.getSelectedPrivateChatPeerValue(),
-        channel = state.getCurrentChannelValue(),
-        isLocationChannel = state.selectedLocationChannel.value is com.bluewhale.android.geohash.ChannelID.Location
-    )
+    private fun captureConversationTarget(): ConversationTarget {
+        val location = state.selectedLocationChannel.value as? com.bluewhale.android.geohash.ChannelID.Location
+        return ConversationTarget(
+            privatePeer = state.getSelectedPrivateChatPeerValue(),
+            channel = state.getCurrentChannelValue(),
+            isLocationChannel = location != null,
+            locationKey = location?.channel?.geohash
+        )
+    }
 
     /** Sends content to the captured conversation as if the user had typed it there. */
     private fun sendAsSelf(

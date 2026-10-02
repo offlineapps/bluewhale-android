@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+- `/ai` answers are private. They are shown only on your device; `/ai share` sends the last
+  answer in a conversation to the chat with the `[ai]` marker. Previously every answer was sent
+  to whoever was in the open conversation.
+
+### Added
+- `/ai` remembers the last few questions and answers per conversation and sees the recent
+  messages of the chat, so follow-up questions and "summarise this" work. `/ai reset` forgets
+  the context; panic wipes it.
+- `/ai stop` cancels a running question.
+
+### Fixed
+- A timed-out `/ai` question kept running on the model, so the next question waited behind it
+  and could time out without the model ever starting on it. Timeouts now cancel the generation,
+  and a question asked while the model is busy is refused with a message instead of queueing.
+
 ## [1.2.0] - 2026-09-22
 
 A privacy and denial of service release with a new debug tool for exercising the
