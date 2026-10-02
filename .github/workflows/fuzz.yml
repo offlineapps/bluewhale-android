@@ -1,0 +1,57 @@
+name: Nightly fuzz
+
+# Runs the decoder fuzz tests far longer than the PR run, with a new seed every night. A failure
+# prints the seed and the input that broke a decoder; rerun locally with the same -PfuzzSeed.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: 'Iterations multiplier'
+        default: '100'
+      seed:
+        description: 'Seed (empty for a new one)'
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz decoders
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Fuzz
+      env:
+        SCALE: ${{ github.event.inputs.scale || '100' }}
+        SEED: ${{ github.event.inputs.seed || github.run_id }}
+      run: |
+        echo "fuzz seed: $SEED, scale: $SCALE"
+        ./gradlew testDebugUnitTest --tests '*FuzzTest' -PfuzzScale="$SCALE" -PfuzzSeed="$SEED"
+
+    - name: Upload test reports
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: fuzz-reports
+        path: |
+          **/build/test-results/
+          **/build/reports/tests/
