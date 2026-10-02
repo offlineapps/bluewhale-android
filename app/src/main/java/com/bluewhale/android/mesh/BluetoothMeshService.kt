@@ -842,8 +842,10 @@ class BluetoothMeshService(private val context: Context) {
                         Log.d(TAG, "🔐 Encrypted file payload: ${encrypted.size} bytes")
                         
                         // Create NOISE_ENCRYPTED packet (not FILE_TRANSFER!)
+                        // v2 for the 4-byte payload length, as in sendFileBroadcast: an
+                        // encrypted file easily exceeds the 64 KiB a v1 packet can describe.
                         val packet = BluewhalePacket(
-                            version = 1u,
+                            version = 2u,
                             type = MessageType.NOISE_ENCRYPTED.value,
                             senderID = hexStringToByteArray(myPeerID),
                             recipientID = hexStringToByteArray(recipientPeerID),
