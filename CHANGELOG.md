@@ -38,6 +38,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Find a friend in a crowd, offline: a warmer/colder finder from the Bluetooth signal with haptic
   pulses, "ring their phone" (favourites only), and a one-shot encrypted GPS position swap. Open
   it from a message, a nickname, or `/find <name>`. See `docs/find_friend.md`.
+- Private files to a direct neighbour go over an LE L2CAP channel when both phones run Android 10
+  or newer, instead of hundreds of GATT fragments, and fall back to GATT on any failure. The
+  channel's PSM is advertised in the announce (TLV `0x42`). See `docs/l2cap_transfer.md`.
 
 ### Fixed
 - A timed-out `/ai` question kept running on the model, so the next question waited behind it
