@@ -34,6 +34,39 @@ object SpecialRecipients {
 }
 
 /**
+ * How a decoded payload was carried on the wire, so a re-encode can reproduce it.
+ *
+ * Signatures cover a re-encoding of the packet, and verification re-encodes too. DEFLATE
+ * output is not canonical and clients use different encoders (java.util.zip.Deflater
+ * here, Apple's compression_encode_buffer on iOS), so compressing again can change the
+ * signed bytes and reject a valid packet. Reusing the received bytes also stops a relay,
+ * which re-encodes on every TTL decrement, from substituting its own encoding.
+ *
+ * [compressedBytes] is null when the payload arrived uncompressed, in which case a
+ * re-encode keeps it uncompressed: shouldCompress agrees across clients, but whether the
+ * compressed form came out smaller need not.
+ */
+class WirePayload(val compressedBytes: ByteArray?)
+
+/**
+ * Wire form of decoded payloads, keyed by the payload array itself.
+ *
+ * A ByteArray compares by identity, so `packet.copy(ttl = ...)` on relay, and the copy
+ * built for signature verification, share the payload array and find the entry, while a
+ * packet whose payload was replaced does not and is compressed afresh. Weak keys let an
+ * entry go with its packet. The value never references the key, which would pin it.
+ */
+internal object WirePayloads {
+    private val byPayload = java.util.Collections.synchronizedMap(java.util.WeakHashMap<ByteArray, WirePayload>())
+
+    fun remember(payload: ByteArray, wire: WirePayload) {
+        byPayload[payload] = wire
+    }
+
+    fun lookup(payload: ByteArray): WirePayload? = byPayload[payload]
+}
+
+/**
  * Binary packet format - 100% backward compatible with iOS version
  *
  * Header (13 bytes for v1, 15 bytes for v2):
@@ -215,9 +248,18 @@ object BinaryProtocol {
             var isCompressed = false
             val isV1 = packet.version < 2u.toUByte()
 
-            // A v1 frame cannot state an original size above 0xFFFF, so such a payload is
-            // never compressed there; the size check below then rejects it outright.
-            if (!(isV1 && payload.size > MAX_V1_PAYLOAD_BYTES) && CompressionUtil.shouldCompress(payload)) {
+            // Re-encode of a decoded packet: reproduce the originator's bytes (see WirePayload).
+            // Otherwise compress if worthwhile. A v1 frame cannot state an original size above
+            // 0xFFFF, so such a payload is never compressed there; the size check below then
+            // rejects it outright.
+            val wire = WirePayloads.lookup(packet.payload)
+            if (wire != null) {
+                wire.compressedBytes?.let { compressed ->
+                    originalPayloadSize = payload.size
+                    payload = compressed
+                    isCompressed = true
+                }
+            } else if (!(isV1 && payload.size > MAX_V1_PAYLOAD_BYTES) && CompressionUtil.shouldCompress(payload)) {
                 CompressionUtil.compress(payload)?.let { compressedPayload ->
                     originalPayloadSize = payload.size
                     payload = compressedPayload
@@ -439,6 +481,8 @@ object BinaryProtocol {
             } else null
 
             // Payload
+            // Kept so the packet can be re-encoded byte-identically (see WirePayload).
+            var receivedCompressed: ByteArray? = null
             val payload = if (isCompressed) {
                 val lengthFieldBytes = if (version >= 2u.toUByte()) 4 else 2
                 if (payloadLength.toInt() < lengthFieldBytes) return null
@@ -473,7 +517,9 @@ object BinaryProtocol {
                 }
                 
                 // Decompress
-                CompressionUtil.decompress(compressedPayload, originalSize) ?: return null
+                val expanded = CompressionUtil.decompress(compressedPayload, originalSize) ?: return null
+                receivedCompressed = compressedPayload
+                expanded
             } else {
                 val payloadBytes = ByteArray(payloadLength.toInt())
                 buffer.get(payloadBytes)
@@ -487,6 +533,8 @@ object BinaryProtocol {
                 signatureBytes
             } else null
             
+            WirePayloads.remember(payload, WirePayload(receivedCompressed))
+
             return BluewhalePacket(
                 version = version,
                 type = type,
