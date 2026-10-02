@@ -182,3 +182,10 @@ dependencies {
     androidTestImplementation(libs.bundles.compose.testing)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
+
+// Fuzz tests (PeerInputFuzzTest) run at scale 1 with fixed seeds by default. The nightly fuzz
+// workflow passes a larger scale and a new seed: -PfuzzScale=100 -PfuzzSeed=1234
+tasks.withType<Test>().configureEach {
+    systemProperty("bluewhale.fuzzScale", project.findProperty("fuzzScale")?.toString() ?: "1")
+    project.findProperty("fuzzSeed")?.let { systemProperty("bluewhale.fuzzSeed", it.toString()) }
+}

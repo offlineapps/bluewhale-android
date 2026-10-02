@@ -193,21 +193,24 @@ object VerificationService {
         var idx = 0
 
         fun take(n: Int): ByteArray? {
-            if (idx + n > data.size) return null
+            if (n < 0 || idx + n > data.size) return null
             val out = data.copyOfRange(idx, idx + n)
             idx += n
             return out
         }
 
+        // Length bytes are unsigned: a field may be up to 255 bytes long
+        fun takeLength(): Int? = take(1)?.get(0)?.toInt()?.and(0xFF)
+
         val t1 = take(1) ?: return null
         if (t1[0].toInt() != 0x01) return null
-        val l1 = take(1)?.get(0)?.toInt() ?: return null
+        val l1 = takeLength() ?: return null
         val noiseBytes = take(l1) ?: return null
         val noise = noiseBytes.toString(Charsets.UTF_8)
 
         val t2 = take(1) ?: return null
         if (t2[0].toInt() != 0x02) return null
-        val l2 = take(1)?.get(0)?.toInt() ?: return null
+        val l2 = takeLength() ?: return null
         val nonce = take(l2) ?: return null
 
         return noise to nonce
@@ -239,26 +242,29 @@ object VerificationService {
         var idx = 0
 
         fun take(n: Int): ByteArray? {
-            if (idx + n > data.size) return null
+            if (n < 0 || idx + n > data.size) return null
             val out = data.copyOfRange(idx, idx + n)
             idx += n
             return out
         }
 
+        // Length bytes are unsigned: a field may be up to 255 bytes long
+        fun takeLength(): Int? = take(1)?.get(0)?.toInt()?.and(0xFF)
+
         val t1 = take(1) ?: return null
         if (t1[0].toInt() != 0x01) return null
-        val l1 = take(1)?.get(0)?.toInt() ?: return null
+        val l1 = takeLength() ?: return null
         val noiseBytes = take(l1) ?: return null
         val noise = noiseBytes.toString(Charsets.UTF_8)
 
         val t2 = take(1) ?: return null
         if (t2[0].toInt() != 0x02) return null
-        val l2 = take(1)?.get(0)?.toInt() ?: return null
+        val l2 = takeLength() ?: return null
         val nonce = take(l2) ?: return null
 
         val t3 = take(1) ?: return null
         if (t3[0].toInt() != 0x03) return null
-        val l3 = take(1)?.get(0)?.toInt() ?: return null
+        val l3 = takeLength() ?: return null
         val sig = take(l3) ?: return null
 
         return VerifyResponse(noise, nonce, sig)
