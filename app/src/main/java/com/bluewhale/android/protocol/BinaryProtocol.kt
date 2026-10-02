@@ -79,8 +79,8 @@ data class BluewhalePacket(
         ttl = ttl
     )
 
-    fun toBinaryData(): ByteArray? {
-        return BinaryProtocol.encode(this)
+    fun toBinaryData(padding: Boolean = true): ByteArray? {
+        return BinaryProtocol.encode(this, padding)
     }
 
     /**
@@ -202,7 +202,12 @@ object BinaryProtocol {
         }
     }
     
-    fun encode(packet: BluewhalePacket): ByteArray? {
+    /**
+     * @param padding pad to a standard block size. Callers that split the frame (fragmentation)
+     * pass false: padding is only meaningful on a frame sent whole, and guessing it back off
+     * with unpad() misfires on an unpadded frame that happens to end in a valid pad pattern.
+     */
+    fun encode(packet: BluewhalePacket, padding: Boolean = true): ByteArray? {
         try {
             // Try to compress payload if beneficial
             var payload = packet.payload
@@ -318,7 +323,9 @@ object BinaryProtocol {
             val result = ByteArray(buffer.position())
             buffer.rewind()
             buffer.get(result)
-            
+
+            if (!padding) return result
+
             // Apply padding to standard block sizes for traffic analysis resistance
             val optimalSize = MessagePadding.optimalBlockSize(result.size)
             val paddedData = MessagePadding.pad(result, optimalSize)
