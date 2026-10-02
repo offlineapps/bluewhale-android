@@ -38,6 +38,10 @@
 }
 -dontwarn com.google.mediapipe.framework.image.**
 
+# LiteRT-LM (/ai with .litertlm models). The native engine calls back into the Kotlin
+# callback and config classes by name.
+-keep class com.google.ai.edge.litertlm.** { *; }
+
 # Fix for AbstractMethodError on API < 29 where LocationListener methods are abstract
 -keepclassmembers class * implements android.location.LocationListener {
     public <methods>;

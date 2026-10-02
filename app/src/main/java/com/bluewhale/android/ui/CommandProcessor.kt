@@ -381,7 +381,7 @@ class CommandProcessor(
 
         if (llmEngine == null || !llmEngine.isModelInstalled()) {
             val path = llmEngine?.modelPath ?: "the model directory"
-            postSystemMessage("no offline model installed. copy a mediapipe .task model to $path")
+            postSystemMessage("no offline model installed. copy a .litertlm model to $path")
             return
         }
 

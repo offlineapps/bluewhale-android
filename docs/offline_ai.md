@@ -54,45 +54,49 @@ instead of queueing it silently.
 No model ships with the app — the inference runtime is bundled, the weights are not. Until a
 model is installed, `/ai` tells you where to put one.
 
-The app reads a single [MediaPipe LLM Inference](https://ai.google.dev/edge/mediapipe/solutions/genai/llm_inference/android)
-task bundle from:
+The app runs [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) models (`.litertlm`) from:
 
 ```
-/sdcard/Android/data/<package>/files/models/model.task
+/sdcard/Android/data/<package>/files/models/model.litertlm
 ```
 
-Download a bundle, then copy it across with the device plugged in over USB, renaming it to
-`model.task`:
+Download a model, then copy it across with the device plugged in over USB, renaming it to
+`model.litertlm`:
 
 ```
-curl -LO https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task
+curl -LO https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm
+adb push Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm \
+  /sdcard/Android/data/com.bluewhale.android/files/models/model.litertlm
+```
+
+Prebuilt models are published by [LiteRT Community](https://huggingface.co/litert-community) on
+Hugging Face. Qwen2.5-1.5B-Instruct (1.6 GB, Apache-2.0, ungated) is a reasonable default.
+Gemma models also work, but their repos are gated — you must accept the licence and download
+with an authenticated token.
+
+LiteRT-LM ships native code for `arm64-v8a` and `x86_64` only. On 32-bit devices `/ai` reports
+that LiteRT-LM is not supported; use a `.task` bundle there (below).
+
+### Older `.task` bundles
+
+Earlier versions read a [MediaPipe LLM Inference](https://ai.google.dev/edge/mediapipe/solutions/genai/llm_inference/android)
+task bundle from `models/model.task`. That still works: when there is no `model.litertlm`, the
+app falls back to `model.task`. Google has put MediaPipe LLM Inference in maintenance mode in
+favour of LiteRT-LM, so new installs should use a `.litertlm` model.
+
+```
 adb push Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task \
   /sdcard/Android/data/com.bluewhale.android/files/models/model.task
 ```
 
-Prebuilt bundles are published by [LiteRT Community](https://huggingface.co/litert-community) on
-Hugging Face. Reasonable choices, all Apache-2.0 and ungated:
+Neither format is the GGUF used by Ollama and llama.cpp. A GGUF downloaded from `ollama.com`
+will not load.
 
-| Model | File | Size |
-|---|---|---|
-| Qwen2.5-0.5B-Instruct | `..._multi-prefill-seq_q8_ekv1280.task` | 521 MB |
-| Qwen2.5-1.5B-Instruct | `..._multi-prefill-seq_q8_ekv1280.task` | 1.6 GB |
-
-The 0.5B model is the sane default: it loads in a few seconds and fits comfortably in an app's
-memory budget. The 1.5B answers better but is more likely to be killed by the OS on mid-range
-hardware.
-
-Google's Gemma 3 bundles also work, but the Hugging Face repos are gated — you must accept the
-licence and download with an authenticated token, which makes them a poor default for an app
-whose users may have no account.
-
-Note that `.task` bundles are not the same format as the GGUF files used by Ollama and
-llama.cpp. A GGUF downloaded from `ollama.com` will not load.
-
-## Why MediaPipe and not llama.cpp
+## Why LiteRT-LM and not llama.cpp
 
 llama.cpp reads GGUF directly, which is what most model links point at, but it publishes no
 Android Maven artifact — using it means vendoring the sources and building them with the NDK.
-MediaPipe ships a prebuilt AAR that Gradle resolves like any other dependency. The tradeoff is
-the model format, and 26 MB of native libraries in an arm64 APK whether or not a model is
-installed.
+LiteRT-LM (and MediaPipe before it) ship prebuilt AARs that Gradle resolves like any other
+dependency. The tradeoff is the model format, and the size of the native libraries in the APK
+whether or not a model is installed. The MediaPipe runtime can be dropped once `.task` installs
+have moved over.
