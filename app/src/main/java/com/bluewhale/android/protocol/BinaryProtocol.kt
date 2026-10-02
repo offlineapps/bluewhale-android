@@ -184,6 +184,10 @@ object BinaryProtocol {
     private const val RECIPIENT_ID_SIZE = 8
     private const val SIGNATURE_SIZE = 64
 
+    // v1 carries the payload length, and the original size of a compressed payload, in
+    // two bytes, so nothing larger can be described by a v1 frame.
+    private const val MAX_V1_PAYLOAD_BYTES = 0xFFFF
+
     object Flags {
         const val HAS_RECIPIENT: UByte = 0x01u
         const val HAS_SIGNATURE: UByte = 0x02u
@@ -204,8 +208,11 @@ object BinaryProtocol {
             var payload = packet.payload
             var originalPayloadSize: Int? = null
             var isCompressed = false
-            
-            if (CompressionUtil.shouldCompress(payload)) {
+            val isV1 = packet.version < 2u.toUByte()
+
+            // A v1 frame cannot state an original size above 0xFFFF, so such a payload is
+            // never compressed there; the size check below then rejects it outright.
+            if (!(isV1 && payload.size > MAX_V1_PAYLOAD_BYTES) && CompressionUtil.shouldCompress(payload)) {
                 CompressionUtil.compress(payload)?.let { compressedPayload ->
                     originalPayloadSize = payload.size
                     payload = compressedPayload
@@ -219,6 +226,12 @@ object BinaryProtocol {
             val signatureBytes = if (packet.signature != null) SIGNATURE_SIZE else 0
             val sizeFieldBytes = if (isCompressed) (if (packet.version >= 2u.toUByte()) 4 else 2) else 0
             val payloadBytes = payload.size + sizeFieldBytes
+            if (isV1 && payloadBytes > MAX_V1_PAYLOAD_BYTES) {
+                // Writing it anyway truncates the length field, and the receiver then reads
+                // part of the payload as the signature and drops the rest.
+                Log.e("BinaryProtocol", "Payload of $payloadBytes bytes does not fit a v1 packet (type ${packet.type})")
+                return null
+            }
             val routeBytes = if (!packet.route.isNullOrEmpty() && packet.version >= 2u.toUByte()) {
                 1 + (packet.route!!.size.coerceAtMost(255) * SENDER_ID_SIZE)
             } else 0
