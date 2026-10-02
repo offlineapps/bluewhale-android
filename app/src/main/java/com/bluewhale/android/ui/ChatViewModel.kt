@@ -5,7 +5,9 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.bluewhale.android.ai.LiteRtLmEngine
 import com.bluewhale.android.ai.MediaPipeLlmEngine
+import com.bluewhale.android.ai.SelectingLlmEngine
 import com.bluewhale.android.favorites.FavoritesPersistenceService
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -100,7 +102,11 @@ class ChatViewModel(
     }
 
     val privateChatManager = PrivateChatManager(state, messageManager, dataManager, noiseSessionDelegate)
-    private val llmEngine = MediaPipeLlmEngine(application.applicationContext)
+    // LiteRT-LM (.litertlm) when installed, else the older MediaPipe .task bundle
+    private val llmEngine = SelectingLlmEngine(
+        preferred = LiteRtLmEngine(application.applicationContext),
+        legacy = MediaPipeLlmEngine(application.applicationContext)
+    )
     private val commandProcessor = CommandProcessor(state, messageManager, channelManager, privateChatManager, llmEngine, viewModelScope)
     private val notificationManager = NotificationManager(
       application.applicationContext,

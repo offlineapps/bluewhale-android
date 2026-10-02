@@ -44,6 +44,7 @@ gms-location = "21.3.0"
 
 # On-device LLM inference
 mediapipe-tasks-genai = "0.10.35"
+litertlm = "0.11.0"
 
 # Security
 security-crypto = "1.1.0-beta01"
@@ -116,6 +117,7 @@ gms-location = { module = "com.google.android.gms:play-services-location", versi
 
 # On-device LLM inference
 mediapipe-tasks-genai = { module = "com.google.mediapipe:tasks-genai", version.ref = "mediapipe-tasks-genai" }
+litertlm-android = { module = "com.google.ai.edge.litertlm:litertlm-android", version.ref = "litertlm" }
 
 # Security
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "security-crypto" }

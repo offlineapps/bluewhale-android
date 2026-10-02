@@ -165,7 +165,9 @@ dependencies {
     // Google Play Services Location
     implementation(libs.gms.location)
 
-    // On-device LLM inference for the /ai command
+    // On-device LLM inference for the /ai command. LiteRT-LM runs .litertlm models; MediaPipe
+    // (maintenance mode) is kept so existing .task installs keep working
+    implementation(libs.litertlm.android)
     implementation(libs.mediapipe.tasks.genai)
 
     // Security preferences

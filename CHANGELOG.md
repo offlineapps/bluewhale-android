@@ -16,6 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   messages of the chat, so follow-up questions and "summarise this" work. `/ai reset` forgets
   the context; panic wipes it.
 - `/ai stop` cancels a running question.
+- `/ai` runs LiteRT-LM models (`models/model.litertlm`). Google has put the MediaPipe LLM
+  Inference API in maintenance mode in favour of LiteRT-LM. Existing `model.task` installs
+  keep working and are used when no `.litertlm` model is present.
 
 ### Fixed
 - A timed-out `/ai` question kept running on the model, so the next question waited behind it
