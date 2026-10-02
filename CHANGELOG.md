@@ -43,6 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   channel's PSM is advertised in the announce (TLV `0x42`). See `docs/l2cap_transfer.md`.
 
 ### Fixed
+- A verification challenge or response with a length byte of 0x80 or more crashed the app: the
+  length was read as a negative number. Any nearby device with a session could send one.
 - A timed-out `/ai` question kept running on the model, so the next question waited behind it
   and could time out without the model ever starting on it. Timeouts now cancel the generation,
   and a question asked while the model is busy is refused with a message instead of queueing.
