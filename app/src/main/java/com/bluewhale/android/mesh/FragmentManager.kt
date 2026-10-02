@@ -3,7 +3,6 @@ package com.bluewhale.android.mesh
 import android.util.Log
 import com.bluewhale.android.protocol.BluewhalePacket
 import com.bluewhale.android.protocol.MessageType
-import com.bluewhale.android.protocol.MessagePadding
 import com.bluewhale.android.model.FragmentPayload
 import kotlinx.coroutines.*
 import java.util.concurrent.ConcurrentHashMap
@@ -66,21 +65,16 @@ class FragmentManager {
     fun createFragments(packet: BluewhalePacket): List<BluewhalePacket> {
         try {
             Log.d(TAG, "🔀 Creating fragments for packet type ${packet.type}, payload: ${packet.payload.size} bytes")
-        val encoded = packet.toBinaryData()
-            if (encoded == null) {
+        // Fragment the unpadded frame; each fragment will be encoded (and padded) independently.
+        // It is encoded without padding rather than padded and then unpadded: frames over
+        // ~2 KB are never padded, and unpad() would strip real bytes from one whose last
+        // signature byte is 0x01 (1 in 256), so the receiver could never decode it.
+        val fullData = packet.toBinaryData(padding = false)
+            if (fullData == null) {
                 Log.e(TAG, "❌ Failed to encode packet to binary data")
                 return emptyList()
             }
-            Log.d(TAG, "📦 Encoded to ${encoded.size} bytes")
-        
-        // Fragment the unpadded frame; each fragment will be encoded (and padded) independently - iOS fix
-        val fullData = try {
-                MessagePadding.unpad(encoded)
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to unpad data: ${e.message}", e)
-                return emptyList()
-            }
-            Log.d(TAG, "📏 Unpadded to ${fullData.size} bytes")
+            Log.d(TAG, "📦 Encoded to ${fullData.size} bytes")
         
         // iOS logic: if data.count > 512 && packet.type != MessageType.fragment.rawValue
         if (fullData.size <= FRAGMENT_SIZE_THRESHOLD) {
