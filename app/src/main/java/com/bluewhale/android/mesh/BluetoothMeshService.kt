@@ -520,9 +520,9 @@ class BluetoothMeshService(private val context: Context) {
                     val deviceAddress = routed.relayAddress
                     val pid = routed.peerID
                     if (deviceAddress != null && pid != null) {
-                        // Check if this is a direct connection (MAX TTL)
-                        // Note: packet.ttl is UByte, compare with AppConstants.MESSAGE_TTL_HOPS
-                        val isDirect = routed.packet.ttl == com.bluewhale.android.util.AppConstants.MESSAGE_TTL_HOPS
+                        // Direct when the announce still carries its starting TTL: 7 by
+                        // default, or the TTL a range-limited sender stated in the payload.
+                        val isDirect = com.bluewhale.android.model.AnnounceOriginTtl.arrivedUnrelayed(routed.packet)
                         
                         if (isDirect) {
                             // Bind or rebind this device address to the announcing peer
@@ -1109,7 +1109,12 @@ class BluetoothMeshService(private val context: Context) {
                         .updateFromAnnouncement(myPeerID, nickname, directPeers, System.currentTimeMillis().toULong())
                 } catch (_: Exception) { }
             } catch (_: Exception) { }
-            
+
+            // A reduced range stamps a TTL below 7, which receivers cannot tell from a
+            // relayed announce; state the starting TTL so they can (see AnnounceOriginTtl).
+            val originTtl = MeshRangePreferenceManager.limitTtl(MAX_TTL)
+            if (originTtl < MAX_TTL) tlvPayload = tlvPayload + com.bluewhale.android.model.AnnounceOriginTtl.encode(originTtl)
+
             val announcePacket = applyMeshRange(
                 BluewhalePacket(
                     type = MessageType.ANNOUNCE.value,
@@ -1174,7 +1179,11 @@ class BluetoothMeshService(private val context: Context) {
                     .updateFromAnnouncement(myPeerID, nickname, directPeers, System.currentTimeMillis().toULong())
             } catch (_: Exception) { }
         } catch (_: Exception) { }
-        
+
+        // See the broadcast announce: state the starting TTL when the range reduces it.
+        val originTtl = MeshRangePreferenceManager.limitTtl(MAX_TTL)
+        if (originTtl < MAX_TTL) tlvPayload = tlvPayload + com.bluewhale.android.model.AnnounceOriginTtl.encode(originTtl)
+
         val packet = applyMeshRange(
             BluewhalePacket(
                 type = MessageType.ANNOUNCE.value,

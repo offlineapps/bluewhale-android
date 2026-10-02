@@ -62,7 +62,7 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
             // This ensures we catch the "first announce" on a new connection for binding,
             // while still dropping looped/relayed duplicates.
             val isFreshAnnounce = messageType == MessageType.ANNOUNCE &&
-                    packet.ttl >= com.bluewhale.android.util.AppConstants.MESSAGE_TTL_HOPS
+                    com.bluewhale.android.model.AnnounceOriginTtl.arrivedUnrelayed(packet)
 
             if (!isFreshAnnounce) {
                 Log.d(TAG, "Dropping duplicate packet: $messageID")
