@@ -209,20 +209,19 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
     }
     
     /**
-     * Generate message ID for duplicate detection
+     * Identity used for replay and duplicate detection.
+     *
+     * This was a 32-bit contentHashCode over at most the first 64 payload bytes, so two
+     * packets from one peer in the same millisecond that shared that prefix collided, and
+     * a collision here silently drops the second packet. PacketIdUtil is the identity gossip
+     * sync and message IDs already use, and iOS derives it the same way: 16 bytes of SHA-256
+     * over type, sender, timestamp and the whole payload. It is also not something a third
+     * party can cheaply collide with.
+     *
+     * Scoping by the peer the packet is attributed to is kept on top of it.
      */
     private fun generateMessageID(packet: BluewhalePacket, peerID: String): String {
-        return when (MessageType.fromValue(packet.type)) {
-            MessageType.FRAGMENT -> {
-                // For fragments, include the payload hash to distinguish different fragments
-                "${packet.timestamp}-$peerID-${packet.type}-${packet.payload.contentHashCode()}"
-            }
-            else -> {
-                // For other messages, use a truncated payload hash
-                val payloadHash = packet.payload.sliceArray(0 until minOf(64, packet.payload.size)).contentHashCode()
-                "${packet.timestamp}-$peerID-$payloadHash"
-            }
-        }
+        return "$peerID-${com.bluewhale.android.sync.PacketIdUtil.computeIdHex(packet)}"
     }
     
     /**
