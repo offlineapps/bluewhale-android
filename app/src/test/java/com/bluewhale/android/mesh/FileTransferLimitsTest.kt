@@ -7,6 +7,7 @@ import com.bluewhale.android.protocol.SpecialRecipients
 import com.bluewhale.android.util.AppConstants
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -72,6 +73,38 @@ class FileTransferLimitsTest {
             fragments.size in 2..AppConstants.Fragmentation.MAX_FRAGMENTS_PER_ID
         )
         assertNotNull(reassemble(manager, fragments))
+    }
+
+    @Test
+    fun `a set still receiving fragments outlives the reassembly timeout`() {
+        // A file near the cap streams for longer than FRAGMENT_TIMEOUT_MS. The set used to
+        // expire 30 s after its first fragment even while the rest were still arriving.
+        var now = 1_000_000L
+        val manager = FragmentManager { now }
+        val fragments = manager.createFragments(filePacket(20_000))
+        assertTrue(fragments.size * 1_000L > AppConstants.Fragmentation.FRAGMENT_TIMEOUT_MS)
+
+        var reassembled: BluewhalePacket? = null
+        fragments.forEach { fragment ->
+            manager.handleFragment(fragment)?.let { reassembled = it }
+            now += 1_000
+            manager.cleanupOldFragments()
+        }
+        assertNotNull("a transfer that keeps making progress must not time out", reassembled)
+    }
+
+    @Test
+    fun `a stalled set still expires`() {
+        var now = 1_000_000L
+        val manager = FragmentManager { now }
+        val fragments = manager.createFragments(filePacket(20_000))
+
+        manager.handleFragment(fragments[0])
+        now += AppConstants.Fragmentation.FRAGMENT_TIMEOUT_MS + 1
+        manager.cleanupOldFragments()
+
+        // The first fragment was discarded with the set, so the rest can never complete it.
+        fragments.drop(1).forEach { assertNull(manager.handleFragment(it)) }
     }
 
     @Test
