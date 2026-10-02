@@ -49,6 +49,7 @@ class BluetoothMeshService(private val context: Context) {
     val myPeerID: String = encryptionService.getIdentityFingerprint().take(16)
     private val peerManager = PeerManager()
     private val fragmentManager = FragmentManager()
+    private val readReceiptRetrySender by lazy { RetryingControlPacketSender(serviceScope) }
     private val securityManager = SecurityManager(encryptionService, myPeerID)
     private val storeForwardManager = StoreForwardManager()
     private val messageHandler = MessageHandler(myPeerID, context.applicationContext)
@@ -1018,11 +1019,23 @@ class BluetoothMeshService(private val context: Context) {
                 
                 // Sign the packet before broadcasting
                 val signedPacket = signPacketBeforeBroadcast(packet)
-                connectionManager.broadcastPacket(RoutedPacket(signedPacket))
-                Log.d(TAG, "📤 Sent read receipt to $recipientPeerID for message $messageID")
 
-                // Persist as read after successful send
-                try { seenStore?.markRead(messageID) } catch (_: Exception) { }
+                // A BLE write being accepted does not mean the peer got it, and once a message
+                // is marked read no receipt is ever sent for it again. So the identical packet
+                // goes out a few times; the receiver's dedup and replay window drop the copies.
+                readReceiptRetrySender.enqueue(
+                    key = "$recipientPeerID:$messageID",
+                    sendAttempt = {
+                        connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+                        true
+                    },
+                    onComplete = { accepted ->
+                        if (accepted) {
+                            Log.d(TAG, "📤 Sent read receipt to $recipientPeerID for message $messageID")
+                            try { seenStore?.markRead(messageID) } catch (_: Exception) { }
+                        }
+                    }
+                )
 
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send read receipt to $recipientPeerID: ${e.message}")
