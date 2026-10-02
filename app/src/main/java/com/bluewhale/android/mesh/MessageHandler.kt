@@ -470,9 +470,13 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                 if (isFileTransfer) {
                     Log.d(TAG, "📥 FILE_TRANSFER decode success (broadcast): name='${file.fileName}', size=${file.fileSize}, mime='${file.mimeType}', from=${peerID.take(8)}")
                 }
+                // A packet re-delivered by gossip sync or another relay has the same ID;
+                // skip it before writing another copy of the file to disk.
+                val messageId = com.bluewhale.android.sync.PacketIdUtil.computeIdHex(packet).uppercase()
+                if (com.bluewhale.android.services.AppStateStore.hasMessageId(messageId)) return
                 val savedPath = com.bluewhale.android.features.file.FileUtils.saveIncomingFile(appContext, file)
                 val message = BluewhaleMessage(
-                    id = java.util.UUID.randomUUID().toString().uppercase(),
+                    id = messageId,
                     sender = delegate?.getPeerNickname(peerID) ?: "unknown",
                     content = savedPath,
                     type = com.bluewhale.android.features.file.FileUtils.messageTypeForMime(file.mimeType),
@@ -488,6 +492,8 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
 
             // Fallback: plain text
             val message = BluewhaleMessage(
+                // Stable across re-deliveries so sync and multipath copies dedupe by ID
+                id = com.bluewhale.android.sync.PacketIdUtil.computeIdHex(packet).uppercase(),
                 sender = delegate?.getPeerNickname(peerID) ?: "unknown",
                 content = String(packet.payload, Charsets.UTF_8),
                 senderPeerID = peerID,
