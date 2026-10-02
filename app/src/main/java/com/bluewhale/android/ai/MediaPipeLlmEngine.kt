@@ -2,12 +2,19 @@ package com.bluewhale.android.ai
 
 import android.content.Context
 import android.util.Log
+import com.google.common.util.concurrent.ListenableFuture
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.ExecutionException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Runs a MediaPipe LLM Inference task bundle entirely on device.
@@ -25,14 +32,16 @@ class MediaPipeLlmEngine(
         private const val TAG = "MediaPipeLlmEngine"
         private const val MODEL_DIR = "models"
         private const val MODEL_FILE = "model.task"
-        private const val DEFAULT_MAX_TOKENS = 512
+        // Input and output share this budget; /ai now sends conversation context as well
+        private const val DEFAULT_MAX_TOKENS = 1024
     }
 
     // Loading the model costs seconds and hundreds of MB, so it is done once on first use.
     private var inference: LlmInference? = null
-    // MediaPipe rejects overlapping generateResponse calls on one instance, and closing
-    // the native handle while a generation is in flight can crash the process. The mutex
-    // serializes generation; close() defers to the generation holding it.
+    // MediaPipe rejects overlapping generations on one instance, and closing the native handle
+    // while a generation is in flight can crash the process. The mutex is held from the start of
+    // a generation until the native side reports it finished, which after a cancellation can be
+    // later than the moment complete() returns. close() defers to whoever holds it.
     private val mutex = Mutex()
     @Volatile
     private var closed = false
@@ -45,15 +54,50 @@ class MediaPipeLlmEngine(
 
     override fun isModelInstalled(): Boolean = File(modelPath).isFile
 
-    override suspend fun complete(prompt: String): String = withContext(Dispatchers.IO) {
-        mutex.withLock {
+    override suspend fun complete(prompt: String): String {
+        // Fail fast rather than queue behind a generation the caller has already given up on
+        if (!mutex.tryLock()) throw LlmBusyException()
+        var stillRunning: ListenableFuture<String>? = null
+        try {
             check(!closed) { "engine is closed" }
-            val engine = inference ?: load().also { inference = it }
-            try {
-                engine.generateResponse(prompt).trim()
-            } finally {
-                if (closed) closeLocked()
+            val engine = withContext(Dispatchers.IO) { inference ?: load().also { inference = it } }
+            // Not cancellable, so a cancellation cannot drop the session without closing it;
+            // a pending cancellation is picked up by await() below
+            val session = withContext(NonCancellable + Dispatchers.IO) {
+                LlmInferenceSession.createFromOptions(
+                    engine,
+                    LlmInferenceSession.LlmInferenceSessionOptions.builder().build()
+                )
             }
+            val future = try {
+                session.addQueryChunk(prompt)
+                session.generateResponseAsync()
+            } catch (e: Throwable) {
+                closeQuietly(session)
+                throw e
+            }
+            try {
+                return future.await().trim()
+            } catch (e: CancellationException) {
+                // Timed out or stopped by the user: ask the native loop to stop, and hand the
+                // lock back only once it has, so the next request does not collide with it.
+                Log.d(TAG, "cancelling generation")
+                try {
+                    session.cancelGenerateResponseAsync()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "cancel failed: ${t.message}")
+                }
+                stillRunning = future
+                future.addListener({
+                    closeQuietly(session)
+                    release()
+                }, Runnable::run)
+                throw e
+            } finally {
+                if (stillRunning == null) closeQuietly(session)
+            }
+        } finally {
+            if (stillRunning == null) release()
         }
     }
 
@@ -69,10 +113,24 @@ class MediaPipeLlmEngine(
         return LlmInference.createFromOptions(context, options)
     }
 
+    /** Called with the mutex held, once no generation is running. */
+    private fun release() {
+        if (closed) closeLocked()
+        mutex.unlock()
+    }
+
+    private fun closeQuietly(session: LlmInferenceSession) {
+        try {
+            session.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "error closing session: ${e.message}")
+        }
+    }
+
     override fun close() {
         closed = true
         // If a generation is in flight it holds the mutex; it will close the handle
-        // in its finally block instead
+        // when it releases it instead
         if (mutex.tryLock()) {
             try {
                 closeLocked()
@@ -90,4 +148,17 @@ class MediaPipeLlmEngine(
         }
         inference = null
     }
+
+    private suspend fun ListenableFuture<String>.await(): String =
+        suspendCancellableCoroutine { cont ->
+            addListener({
+                try {
+                    cont.resume(get())
+                } catch (e: ExecutionException) {
+                    cont.resumeWithException(e.cause ?: e)
+                } catch (e: Throwable) {
+                    cont.resumeWithException(e)
+                }
+            }, Runnable::run)
+        }
 }

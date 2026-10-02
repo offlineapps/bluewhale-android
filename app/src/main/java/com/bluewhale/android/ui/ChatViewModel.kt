@@ -925,6 +925,9 @@ class ChatViewModel(
         channelManager.clearAllChannels()
         privateChatManager.clearAllPrivateChats()
         dataManager.clearAllData()
+
+        // Forget /ai conversation context and stop any generation
+        commandProcessor.clearAiMemory()
         
         // Clear seen message store
         try {

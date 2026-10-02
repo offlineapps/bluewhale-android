@@ -5,7 +5,11 @@ import androidx.test.core.app.ApplicationProvider
 import com.bluewhale.android.ai.LlmEngine
 import com.bluewhale.android.mesh.BluetoothMeshService
 import junit.framework.TestCase.assertEquals
+import junit.framework.TestCase.assertFalse
 import junit.framework.TestCase.assertTrue
+import com.bluewhale.android.ai.LlmBusyException
+import com.bluewhale.android.model.BluewhaleMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.TestScope
@@ -28,10 +32,22 @@ class AiCommandTest {
 
     /** Completes only when the test releases it, so the test can act mid-generation. */
     private class GatedLlmEngine : LlmEngine {
-        val gate = CompletableDeferred<String>()
+        var gate = CompletableDeferred<String>()
+        var calls = 0
+        var cancelled = 0
+        val prompts = mutableListOf<String>()
         override val modelPath = "/data/models/model.task"
         override fun isModelInstalled() = true
-        override suspend fun complete(prompt: String): String = gate.await()
+        override suspend fun complete(prompt: String): String {
+            calls++
+            prompts.add(prompt)
+            try {
+                return gate.await()
+            } catch (e: CancellationException) {
+                cancelled++
+                throw e
+            }
+        }
         override fun close() {}
     }
 
@@ -40,6 +56,7 @@ class AiCommandTest {
         private val reply: String = "hello from the model",
         private val failure: Exception? = null
     ) : LlmEngine {
+        /** The full model input, including context. */
         var receivedPrompt: String? = null
 
         override val modelPath = "/data/models/model.task"
@@ -85,28 +102,60 @@ class AiCommandTest {
 
     private fun messageContents(): List<String> = chatState.getMessagesValue().map { it.content }
 
+    /** The user's question is the last "user:" line of the model input. */
+    private fun question(prompt: String?): String? =
+        prompt?.lines()?.lastOrNull { it.startsWith("user: ") }?.removePrefix("user: ")
+
+    private val usage = "usage: /ai <prompt> | /ai share | /ai stop | /ai reset"
+
     @Test
-    fun `ai command sends the reply to the conversation`() {
+    fun `ai answer is shown locally and not sent to peers`() {
         val engine = FakeLlmEngine(reply = "42")
         val handled = run(processorWith(engine), "/ai what is six times seven")
 
         assertTrue(handled)
-        assertEquals("what is six times seven", engine.receivedPrompt)
+        assertEquals("what is six times seven", question(engine.receivedPrompt))
+        assertEquals(emptyList<String>(), sent)
+        assertTrue(messageContents().contains("ai: 42"))
+        assertTrue(messageContents().contains(CommandProcessor.AI_PRIVATE_HINT))
+    }
+
+    @Test
+    fun `ai answer is a local system message, not one under the user's nickname`() {
+        run(processorWith(FakeLlmEngine(reply = "42")), "/ai hello")
+
+        val answer = chatState.getMessagesValue().single { it.content == "ai: 42" }
+        assertEquals("system", answer.sender)
+    }
+
+    @Test
+    fun `ai share sends the last answer, marked as machine generated`() {
+        val processor = processorWith(FakeLlmEngine(reply = "42"))
+        run(processor, "/ai what is six times seven")
+        run(processor, "/ai share")
+
         assertEquals(listOf("[ai] \"what is six times seven\": 42"), sent)
+        assertTrue(messageContents().contains("[ai] \"what is six times seven\": 42"))
     }
 
     @Test
-    fun `sent reply is marked as machine generated`() {
-        run(processorWith(FakeLlmEngine(reply = "42")), "/ai hello")
+    fun `ai share with nothing to share sends nothing`() {
+        run(processorWith(FakeLlmEngine()), "/ai share")
 
-        assertTrue(sent.single().startsWith("[ai] "))
+        assertEquals(emptyList<String>(), sent)
+        assertTrue(messageContents().single().contains("nothing to share"))
     }
 
     @Test
-    fun `ai command echoes the reply locally as well as sending it`() {
-        run(processorWith(FakeLlmEngine(reply = "42")), "/ai hello")
+    fun `ai share only shares answers from the conversation it is typed in`() {
+        val processor = processorWith(FakeLlmEngine(reply = "secret"))
+        chatState.setSelectedPrivateChatPeer("bob")
+        run(processor, "/ai draft a reply to bob")
 
-        assertTrue(messageContents().contains("[ai] \"hello\": 42"))
+        chatState.setSelectedPrivateChatPeer(null)
+        run(processor, "/ai share")
+
+        assertEquals(emptyList<String>(), sent)
     }
 
     @Test
@@ -114,7 +163,7 @@ class AiCommandTest {
         val engine = FakeLlmEngine()
         run(processorWith(engine), "/ai")
 
-        assertEquals(listOf("usage: /ai <prompt>"), messageContents())
+        assertEquals(listOf(usage), messageContents())
         assertEquals(null, engine.receivedPrompt)
     }
 
@@ -123,7 +172,7 @@ class AiCommandTest {
         val engine = FakeLlmEngine()
         run(processorWith(engine), "/ai    ")
 
-        assertEquals(listOf("usage: /ai <prompt>"), messageContents())
+        assertEquals(listOf(usage), messageContents())
         assertEquals(null, engine.receivedPrompt)
     }
 
@@ -190,7 +239,7 @@ class AiCommandTest {
         val engine = FakeLlmEngine()
         run(processorWith(engine), "/ai summarise the last message for me")
 
-        assertEquals("summarise the last message for me", engine.receivedPrompt)
+        assertEquals("summarise the last message for me", question(engine.receivedPrompt))
     }
 
     @Test
@@ -202,9 +251,10 @@ class AiCommandTest {
         chatState.setSelectedPrivateChatPeer("bob")
         engine.gate.complete("late reply")
 
-        assertEquals(listOf("[ai] \"hello\": late reply"), sent)
+        assertTrue(messageContents().contains("ai: late reply"))
         val bobMessages = chatState.getPrivateChatsValue()["bob"].orEmpty().map { it.content }
         assertTrue(bobMessages.none { it.contains("late reply") })
+        assertTrue(sent.isEmpty())
     }
 
     @Test
@@ -230,6 +280,146 @@ class AiCommandTest {
 
         assertTrue(messageContents().any { it.contains("ai timed out") })
         assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    fun `a timed out generation is cancelled instead of left running`() {
+        val engine = GatedLlmEngine()
+        run(processorWith(engine), "/ai hello")
+
+        testScope.testScheduler.advanceTimeBy(181_000)
+        testScope.testScheduler.runCurrent()
+
+        assertEquals(1, engine.cancelled)
+    }
+
+    @Test
+    fun `the next question runs after a timeout`() {
+        val engine = GatedLlmEngine()
+        val processor = processorWith(engine)
+        run(processor, "/ai first")
+        testScope.testScheduler.advanceTimeBy(181_000)
+        testScope.testScheduler.runCurrent()
+
+        engine.gate = CompletableDeferred()
+        run(processor, "/ai second")
+        engine.gate.complete("second answer")
+
+        assertEquals(2, engine.calls)
+        assertTrue(messageContents().contains("ai: second answer"))
+    }
+
+    @Test
+    fun `a question asked while the model is busy is refused, not queued`() {
+        val engine = GatedLlmEngine()
+        val processor = processorWith(engine)
+        run(processor, "/ai first")
+        run(processor, "/ai second")
+
+        assertEquals(1, engine.calls)
+        assertTrue(messageContents().any { it.startsWith("ai is still answering") })
+    }
+
+    @Test
+    fun `ai stop cancels the running question`() {
+        val engine = GatedLlmEngine()
+        val processor = processorWith(engine)
+        run(processor, "/ai first")
+        run(processor, "/ai stop")
+        testScope.testScheduler.runCurrent()
+
+        assertEquals(1, engine.cancelled)
+        assertTrue(messageContents().contains("ai: stopped."))
+
+        engine.gate = CompletableDeferred()
+        run(processor, "/ai second")
+        engine.gate.complete("ok")
+        assertTrue(messageContents().contains("ai: ok"))
+    }
+
+    @Test
+    fun `an engine still stopping an earlier request is reported, not shown as a failure`() {
+        val engine = object : LlmEngine {
+            override val modelPath = "/data/models/model.task"
+            override fun isModelInstalled() = true
+            override suspend fun complete(prompt: String): String = throw LlmBusyException()
+            override fun close() {}
+        }
+        run(processorWith(engine), "/ai hello")
+
+        assertTrue(messageContents().any { it.contains("still stopping the previous request") })
+        assertTrue(messageContents().none { it.startsWith("ai failed") })
+    }
+
+    @Test
+    fun `follow up questions carry the earlier turn`() {
+        val engine = GatedLlmEngine()
+        val processor = processorWith(engine)
+        run(processor, "/ai what is a spring tide")
+        engine.gate.complete("a tide at new and full moon")
+
+        engine.gate = CompletableDeferred()
+        run(processor, "/ai when is the next one")
+
+        val second = engine.prompts.last()
+        assertTrue(second.contains("user: what is a spring tide\nassistant: a tide at new and full moon"))
+        assertEquals("when is the next one", question(second))
+    }
+
+    @Test
+    fun `context is kept per conversation`() {
+        val engine = GatedLlmEngine()
+        val processor = processorWith(engine)
+        run(processor, "/ai mesh question")
+        engine.gate.complete("mesh answer")
+
+        chatState.setSelectedPrivateChatPeer("bob")
+        engine.gate = CompletableDeferred()
+        run(processor, "/ai bob question")
+
+        assertFalse(engine.prompts.last().contains("mesh question"))
+    }
+
+    @Test
+    fun `ai reset forgets the conversation`() {
+        val engine = GatedLlmEngine()
+        val processor = processorWith(engine)
+        run(processor, "/ai first")
+        engine.gate.complete("one")
+        run(processor, "/ai reset")
+
+        engine.gate = CompletableDeferred()
+        run(processor, "/ai second")
+
+        assertFalse(engine.prompts.last().contains("first"))
+        engine.gate.complete("two")
+        run(processor, "/ai share")
+        assertEquals(listOf("[ai] \"second\": two"), sent)
+    }
+
+    @Test
+    fun `clearAiMemory forgets every conversation`() {
+        val engine = GatedLlmEngine()
+        val processor = processorWith(engine)
+        run(processor, "/ai first")
+        engine.gate.complete("one")
+
+        processor.clearAiMemory()
+        run(processor, "/ai share")
+
+        assertEquals(emptyList<String>(), sent)
+    }
+
+    @Test
+    fun `recent chat messages are given to the model, system lines are not`() {
+        messageManager.addMessage(BluewhaleMessage(sender = "alice", content = "meet at the north gate at six", timestamp = java.util.Date(), isRelay = false))
+        messageManager.addMessage(BluewhaleMessage(sender = "system", content = "alice joined", timestamp = java.util.Date(), isRelay = false))
+        val engine = FakeLlmEngine()
+        run(processorWith(engine), "/ai summarise this")
+
+        val prompt = engine.receivedPrompt!!
+        assertTrue(prompt.contains("alice: meet at the north gate at six"))
+        assertFalse(prompt.contains("alice joined"))
     }
 
     @Test
