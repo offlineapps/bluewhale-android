@@ -93,6 +93,18 @@ class BluetoothMeshService(private val context: Context) {
             courierModeEnabled = { com.bluewhale.android.courier.CourierPreferenceManager.isEnabled() }
         )
     }
+    // LE L2CAP channels for large transfers to direct neighbours (Android 10+); GATT otherwise
+    private val l2cap: com.bluewhale.android.mesh.l2cap.L2capTransport? by lazy {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            (context.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager)?.adapter?.let { adapter ->
+                com.bluewhale.android.mesh.l2cap.L2capTransport(adapter, serviceScope) { bytes, address ->
+                    handleL2capFrame(bytes, address)
+                }
+            }
+        } else null
+    }
+    // peerID -> the PSM their announce advertised
+    private val peerL2capPsm = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     // Service state management
     private var isActive = false
@@ -590,6 +602,9 @@ class BluetoothMeshService(private val context: Context) {
                                     Log.w(TAG, "Courier handover failed: ${e.message}")
                                 }
                             }
+                            // Remember the neighbour's L2CAP channel for large transfers
+                            val psm = com.bluewhale.android.model.AnnounceL2capPsm.decode(routed.packet.payload)
+                            if (psm != null) peerL2capPsm[pid] = psm else peerL2capPsm.remove(pid)
                         }
                     }
                     // Track for sync
@@ -745,6 +760,7 @@ class BluetoothMeshService(private val context: Context) {
 
         if (connectionManager.startServices()) {
             isActive = true
+            if (l2cap?.start() == true) Log.d(TAG, "L2CAP listening on PSM ${l2cap?.psm}")
             
             // Start periodic announcements for peer discovery and connectivity
             sendPeriodicBroadcastAnnounce()
@@ -786,6 +802,7 @@ class BluetoothMeshService(private val context: Context) {
             gossipSyncManager.stop()
             Log.d(TAG, "GossipSyncManager stopped")
             connectionManager.stopServices()
+            l2cap?.stop()
             Log.d(TAG, "BluetoothConnectionManager stop requested")
             peerManager.shutdown()
             fragmentManager.shutdown()
@@ -926,6 +943,10 @@ class BluetoothMeshService(private val context: Context) {
                         val signed = signPacketBeforeBroadcast(packet)
                         // Use a stable transferId based on the unencrypted file TLV payload for progress tracking
                         val transferId = sha256Hex(filePayload)
+                        if (sendViaL2cap(recipientPeerID, signed, transferId)) {
+                            Log.d(TAG, "✅ Sent encrypted file to $recipientPeerID over L2CAP")
+                            return@launch
+                        }
                         connectionManager.broadcastPacket(RoutedPacket(signed, transferId = transferId))
                         Log.d(TAG, "✅ Sent encrypted file to $recipientPeerID")
                         
@@ -1215,7 +1236,7 @@ class BluetoothMeshService(private val context: Context) {
                     type = MessageType.ANNOUNCE.value,
                     ttl = MAX_TTL,
                     senderID = myPeerID,
-                    payload = tlvPayload
+                    payload = withL2capPsm(tlvPayload)
                 )
             )
 
@@ -1284,7 +1305,7 @@ class BluetoothMeshService(private val context: Context) {
                 type = MessageType.ANNOUNCE.value,
                 ttl = MAX_TTL,
                 senderID = myPeerID,
-                payload = tlvPayload
+                payload = withL2capPsm(tlvPayload)
             )
         )
 
@@ -1698,6 +1719,44 @@ class BluetoothMeshService(private val context: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "Live voice frame send failed: ${e.message}")
         }
+    }
+
+    // MARK: - L2CAP
+
+    private fun withL2capPsm(tlvPayload: ByteArray): ByteArray =
+        l2cap?.psm?.let { tlvPayload + com.bluewhale.android.model.AnnounceL2capPsm.encode(it) } ?: tlvPayload
+
+    /**
+     * Sends a packet to a direct neighbour over its L2CAP channel when both sides have one.
+     * True only once the receiver acknowledged the whole packet; on false use GATT.
+     */
+    private suspend fun sendViaL2cap(peerID: String, packet: BluewhalePacket, transferId: String?): Boolean {
+        val transport = l2cap ?: return false
+        // Listen-only stealth sends nothing; the GATT path drops it at the broadcaster
+        if (StealthModePreferenceManager.isEnabled()) return false
+        val psm = peerL2capPsm[peerID] ?: return false
+        if (peerManager.getPeerInfo(peerID)?.isDirectConnection != true) return false
+        val address = connectionManager.addressPeerMap.entries.firstOrNull { it.value == peerID }?.key ?: return false
+        val bytes = packet.toBinaryData(padding = false) ?: return false
+        transferId?.let { TransferProgressManager.start(it, 1) }
+        val sent = transport.send(address, psm, bytes)
+        if (sent) {
+            transferId?.let {
+                TransferProgressManager.progress(it, 1, 1)
+                TransferProgressManager.complete(it, 1)
+            }
+        } else {
+            Log.w(TAG, "L2CAP to $peerID failed; falling back to GATT")
+        }
+        return sent
+    }
+
+    /** A packet that arrived on an L2CAP channel takes the same path as one from GATT. */
+    private fun handleL2capFrame(bytes: ByteArray, address: String) {
+        val packet = com.bluewhale.android.protocol.BinaryProtocol.decode(bytes) ?: return
+        val peerID = packet.senderID.toHexString()
+        if (peerID == myPeerID) return
+        packetProcessor.processPacket(RoutedPacket(packet, peerID, address))
     }
 
     /**
