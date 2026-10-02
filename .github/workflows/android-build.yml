@@ -44,6 +44,23 @@ jobs:
     - name: Run lint
       run: ./gradlew lintDebug
 
+    # Temporary: summarise current lint issues and emit a fresh baseline
+    - name: Probe lint baseline
+      run: |
+        python3 - <<'PY'
+        import re, collections
+        s = open('app/build/reports/lint-results-debug.xml').read()
+        c = collections.Counter(re.findall(r'<issue\s+id="([^"]+)"\s+severity="([^"]+)"', s))
+        for (i, sev), n in sorted(c.items(), key=lambda x: (x[0][1], -x[1])):
+            print(f"LINTSUM {sev:12} {n:5} {i}")
+        PY
+        rm app/lint-baseline.xml
+        ./gradlew lintDebug || true
+        echo "BASELINE_B64_BEGIN"
+        gzip -9c app/lint-baseline.xml | base64 -w0
+        echo
+        echo "BASELINE_B64_END"
+
     - name: Upload test reports
       if: always()
       uses: actions/upload-artifact@v4
