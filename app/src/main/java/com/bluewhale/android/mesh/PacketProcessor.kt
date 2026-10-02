@@ -184,6 +184,7 @@ class PacketProcessor(private val myPeerID: String) {
             MessageType.LEAVE -> handleLeave(routed)
             MessageType.FRAGMENT -> handleFragment(routed)
             MessageType.REQUEST_SYNC -> handleRequestSync(routed)
+            MessageType.COURIER -> delegate?.handleCourier(routed)
             else -> {
                 // Handle private packet types (address check required)
                 if (packetRelayManager.isPacketAddressedToMe(packet)) {
@@ -353,6 +354,7 @@ interface PacketProcessorDelegate {
     fun handleLeave(routed: RoutedPacket)
     fun handleFragment(packet: BluewhalePacket): BluewhalePacket?
     fun handleRequestSync(routed: RoutedPacket)
+    fun handleCourier(routed: RoutedPacket) {}
     
     // Communication
     fun sendAnnouncementToPeer(peerID: String)

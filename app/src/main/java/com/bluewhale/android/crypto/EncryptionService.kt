@@ -120,6 +120,12 @@ open class EncryptionService(private val context: Context) {
     /**
      * Sign data using our Ed25519 signing key (for identity announcements)
      */
+    fun sealForStaticKey(recipientStaticKey: ByteArray, plaintext: ByteArray, prologue: ByteArray): ByteArray =
+        noiseService.sealForStaticKey(recipientStaticKey, plaintext, prologue)
+
+    fun openSealed(sealed: ByteArray, prologue: ByteArray): com.bluewhale.android.courier.CourierSeal.Opened? =
+        noiseService.openSealed(sealed, prologue)
+
     fun signData(data: ByteArray): ByteArray? {
         return try {
             val signer = Ed25519Signer()

@@ -27,6 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Jamming detection. Several Bluetooth links failing with radio timeouts at once, and a busy
   mesh going silent while scanning, are reported in the chat as possible or likely jamming. Likely
   jamming switches the radio to full power until it clears. See `docs/jamming_detection.md`.
+- Courier mode: `/courier <message>` seals a private message to someone out of reach and hands it
+  to people passing by. Phones with courier mode on carry sealed envelopes they cannot read and
+  hand them on until they reach the recipient or expire after three days. See
+  `docs/courier_mode.md`.
 
 ### Fixed
 - A timed-out `/ai` question kept running on the model, so the next question waited behind it
