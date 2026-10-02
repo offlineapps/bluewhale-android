@@ -43,6 +43,20 @@ the app is closed.
 Messages from other people end up in the model's input, and someone could write a message that
 tries to steer it. That is one more reason answers stay private until you have read them.
 
+## Translating messages
+
+The same model translates incoming messages, without anything leaving the phone:
+
+- Long-press a message from someone else and pick **translate message**.
+- Or type `/tr` to translate the newest message from someone else in the open conversation.
+  `/tr spanish` picks the language; it is remembered until the app restarts. The default is the
+  phone's language.
+
+The translation appears as a local line under the conversation, like an `/ai` answer, and is
+never sent. Small models translate between major languages reasonably well and struggle with
+slang and rare languages; treat the result as a gist. Translation and `/ai` share the model, so
+one waits for the other, and `/ai stop` cancels either.
+
 ## Timeouts
 
 A question that takes longer than three minutes is stopped, and the model is free for the next

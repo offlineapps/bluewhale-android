@@ -207,6 +207,8 @@
   <string name="choose_action_user">choose an action for this user</string>
   <string name="action_copy_message_title">copy message</string>
   <string name="action_copy_message_subtitle">copy this message to clipboard</string>
+  <string name="action_translate_message_title">translate message</string>
+  <string name="action_translate_message_subtitle">translate on this device with the offline ai model</string>
   <string name="action_slap_title">slap %1$s</string>
   <string name="action_slap_subtitle">send a playful slap message</string>
   <string name="action_hug_title">hug %1$s</string>
