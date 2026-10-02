@@ -93,6 +93,18 @@ class BluetoothConnectionManager(
 
     init {
         powerManager.delegate = this
+        StealthModePreferenceManager.init(context)
+        // Stealth turns advertising and the GATT server off; leaving it brings them back
+        connectionScope.launch {
+            StealthModePreferenceManager.enabled.collect { stealth ->
+                if (!isActive) return@collect
+                if (stealth) {
+                    serverManager.stop()
+                } else if (serverRoleEnabled()) {
+                    serverManager.start()
+                }
+            }
+        }
         // Observe debug settings to enforce role state while active
         try {
             val dbg = com.bluewhale.android.ui.debug.DebugSettingsManager.getInstance()
@@ -100,7 +112,7 @@ class BluetoothConnectionManager(
             connectionScope.launch {
                 dbg.gattServerEnabled.collect { enabled ->
                     if (!isActive) return@collect
-                    if (enabled) startServer() else stopServer()
+                    if (enabled && !StealthModePreferenceManager.isEnabled()) startServer() else stopServer()
                 }
             }
             connectionScope.launch {
@@ -201,7 +213,8 @@ class BluetoothConnectionManager(
                 
                 // Start server/client based on debug settings
                 val dbg = try { com.bluewhale.android.ui.debug.DebugSettingsManager.getInstance() } catch (_: Exception) { null }
-                val startServer = dbg?.gattServerEnabled?.value != false
+                // Stealth mode: no advertising and no GATT server, so nothing announces this device
+                val startServer = dbg?.gattServerEnabled?.value != false && !StealthModePreferenceManager.isEnabled()
                 val startClient = dbg?.gattClientEnabled?.value != false
 
                 if (startServer) {
@@ -212,7 +225,7 @@ class BluetoothConnectionManager(
                     }
                     Log.d(TAG, "GATT Server started")
                 } else {
-                    Log.i(TAG, "GATT Server disabled by debug settings; not starting")
+                    Log.i(TAG, "GATT Server not started (debug settings or stealth mode)")
                 }
 
                 if (startClient) {
@@ -320,7 +333,14 @@ class BluetoothConnectionManager(
     
 
     // Expose role controls for debug UI
-    fun startServer() { connectionScope.launch { serverManager.start() } }
+    fun startServer() {
+        if (StealthModePreferenceManager.isEnabled()) return
+        connectionScope.launch { serverManager.start() }
+    }
+
+    private fun serverRoleEnabled(): Boolean = try {
+        com.bluewhale.android.ui.debug.DebugSettingsManager.getInstance().gattServerEnabled.value
+    } catch (_: Exception) { true }
     fun stopServer() { connectionScope.launch { serverManager.stop() } }
     fun startClient() { connectionScope.launch { clientManager.start() } }
     fun stopClient() { connectionScope.launch { clientManager.stop() } }

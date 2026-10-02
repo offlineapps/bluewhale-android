@@ -17,6 +17,7 @@ import com.bluewhale.android.sync.GossipSyncManager
 import com.bluewhale.android.util.toHexString
 import com.bluewhale.android.services.VerificationService
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.drop
 import java.util.*
 import kotlin.math.sign
 import kotlin.random.Random
@@ -690,6 +691,7 @@ class BluetoothMeshService(private val context: Context) {
         Log.i(TAG, "Starting Bluetooth mesh service with peer ID: $myPeerID")
 
         MeshRangePreferenceManager.init(context)
+        StealthModePreferenceManager.init(context)
 
         if (connectionManager.startServices()) {
             isActive = true
@@ -700,6 +702,12 @@ class BluetoothMeshService(private val context: Context) {
             // Start periodic syncs
             gossipSyncManager.start()
             Log.d(TAG, "GossipSyncManager started")
+            // Leaving stealth mode: announce at once instead of waiting for the next periodic one
+            serviceScope.launch {
+                StealthModePreferenceManager.enabled.drop(1).collect { stealth ->
+                    if (!stealth && this@BluetoothMeshService.isActive) sendBroadcastAnnounce()
+                }
+            }
         } else {
             Log.e(TAG, "Failed to start Bluetooth services")
         }

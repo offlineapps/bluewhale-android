@@ -21,6 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `/ai` runs LiteRT-LM models (`models/model.litertlm`). Google has put the MediaPipe LLM
   Inference API in maintenance mode in favour of LiteRT-LM. Existing `model.task` installs
   keep working and are used when no `.litertlm` model is present.
+- Stealth (listen only) mode in settings. The device stops advertising and announcing, and
+  sends and relays nothing over Bluetooth, while still connecting to nearby peers to receive
+  public messages. See `docs/stealth_mode.md`.
 
 ### Fixed
 - A timed-out `/ai` question kept running on the model, so the next question waited behind it
@@ -54,7 +57,6 @@ Bluetooth traffic, so upgrading is recommended.
   pipeline, so identity binding, dedup, relay, and reassembly can be exercised
   from one device. Injected packets carry a zero hop count and are never sent over
   Bluetooth, and the whole tool is off by default (#28).
-
 
 ## [1.1.1] - 2026-07-28
 
