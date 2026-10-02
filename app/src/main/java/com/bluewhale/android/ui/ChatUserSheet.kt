@@ -90,6 +90,25 @@ fun ChatUserSheet(
                         }
                     }
                     
+                    // Translate a received text message with the on-device model
+                    selectedMessage?.takeIf {
+                        it.sender != viewModel.nickname.value &&
+                            it.type == com.bluewhale.android.model.BluewhaleMessageType.Message &&
+                            it.content.isNotBlank()
+                    }?.let { message ->
+                        item {
+                            UserActionRow(
+                                title = stringResource(R.string.action_translate_message_title),
+                                subtitle = stringResource(R.string.action_translate_message_subtitle),
+                                titleColor = standardPrimary,
+                                onClick = {
+                                    viewModel.translateMessage(message)
+                                    onDismiss()
+                                }
+                            )
+                        }
+                    }
+
                     // Only show user actions for other users' messages or when no message is selected
                     if (selectedMessage?.sender != viewModel.nickname.value) {
                         // Slap action

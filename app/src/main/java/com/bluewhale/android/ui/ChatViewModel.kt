@@ -857,6 +857,11 @@ class ChatViewModel(
         verificationHandler.unverifyFingerprintValue(fingerprint)
     }
 
+    /** Translates a received message with the offline model; the result is shown only locally. */
+    fun translateMessage(message: BluewhaleMessage) {
+        commandProcessor.translateMessage(message)
+    }
+
     // MARK: - Command Autocomplete (delegated)
     
     fun updateCommandSuggestions(input: String) {

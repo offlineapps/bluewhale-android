@@ -3,6 +3,7 @@ package com.bluewhale.android.ui
 import com.bluewhale.android.ai.AiConversationMemory
 import com.bluewhale.android.ai.LlmBusyException
 import com.bluewhale.android.ai.LlmEngine
+import com.bluewhale.android.ai.TranslationPrompt
 import com.bluewhale.android.mesh.BluetoothMeshService
 import com.bluewhale.android.model.BluewhaleMessage
 import kotlinx.coroutines.CancellationException
@@ -35,6 +36,8 @@ class CommandProcessor(
     // /ai context per conversation; never leaves the device
     private val aiMemory = AiConversationMemory()
     private var aiJob: Job? = null
+    // Set by "/tr <language>"; the device language until then
+    private var translationLanguage: String? = null
 
     // Available commands list
     private val baseCommands = listOf(
@@ -46,6 +49,7 @@ class CommandProcessor(
         CommandSuggestion("/j", listOf("/join"), "<channel>", "join or create a channel"),
         CommandSuggestion("/m", listOf("/msg"), "<nickname> [message]", "send private message"),
         CommandSuggestion("/slap", emptyList(), "<nickname>", "slap someone with a trout"),
+        CommandSuggestion("/tr", listOf("/translate"), "[language]", "translate the last message offline"),
         CommandSuggestion("/unblock", emptyList(), "<nickname>", "unblock a peer"),
         CommandSuggestion("/w", emptyList(), null, "see who's online")
     )
@@ -59,6 +63,7 @@ class CommandProcessor(
         val cmd = parts.first().lowercase()
         when (cmd) {
             "/ai" -> handleAiCommand(parts, meshService, myPeerID, onSendMessage)
+            "/tr", "/translate" -> handleTranslateCommand(parts, myPeerID)
             "/j", "/join" -> handleJoinCommand(parts, myPeerID)
             "/m", "/msg" -> handleMessageCommand(parts, meshService)
             "/w" -> handleWhoCommand(meshService, viewModel)
@@ -379,18 +384,9 @@ class CommandProcessor(
             }
         }
 
-        if (llmEngine == null || !llmEngine.isModelInstalled()) {
-            val path = llmEngine?.modelPath ?: "the model directory"
-            postSystemMessage("no offline model installed. copy a .litertlm model to $path")
-            return
-        }
-
         // One generation at a time: the model cannot run two, and queueing silently made a
         // second question look like it had hung
-        if (aiJob?.isActive == true) {
-            postSystemMessage("ai is still answering the previous question. /ai stop cancels it.", target)
-            return
-        }
+        val engine = readyEngineOrExplain(target) ?: return
 
         // Inference takes seconds to minutes; the user may open another chat meanwhile.
         // Everything below must go to the conversation the command was typed into.
@@ -398,10 +394,28 @@ class CommandProcessor(
 
         // Answers stay on this device until the user explicitly shares them with /ai share
         postSystemMessage("ai: thinking…", target)
+        launchGeneration(engine, fullPrompt, target) { reply ->
+            aiMemory.record(target.key, prompt, reply)
+            postSystemMessage("ai: $reply", target)
+            postSystemMessage(AI_PRIVATE_HINT, target)
+        }
+    }
+
+    /**
+     * Runs one generation for [target]. Progress and errors are local system messages; only
+     * a non-blank reply reaches [onReply]. Shared by /ai and translation, so /ai stop and the
+     * one-at-a-time rule cover both.
+     */
+    private fun launchGeneration(
+        engine: LlmEngine,
+        modelInput: String,
+        target: ConversationTarget,
+        onReply: (String) -> Unit
+    ) {
         aiJob = coroutineScope.launch {
             val reply = try {
                 // Cancelling on timeout also stops the engine, so it is free for the next question
-                withTimeout(AI_INFERENCE_TIMEOUT_MS) { llmEngine.complete(fullPrompt) }
+                withTimeout(AI_INFERENCE_TIMEOUT_MS) { engine.complete(modelInput) }
             } catch (e: TimeoutCancellationException) {
                 postSystemMessage("ai timed out after ${AI_INFERENCE_TIMEOUT_MS / 1000}s and was stopped.", target)
                 return@launch
@@ -419,10 +433,75 @@ class CommandProcessor(
                 postSystemMessage("ai returned an empty response.", target)
                 return@launch
             }
+            onReply(reply)
+        }
+    }
 
-            aiMemory.record(target.key, prompt, reply)
-            postSystemMessage("ai: $reply", target)
-            postSystemMessage(AI_PRIVATE_HINT, target)
+    /** Explains why the model cannot run right now, or returns the engine if it can. */
+    private fun readyEngineOrExplain(target: ConversationTarget): LlmEngine? {
+        if (llmEngine == null || !llmEngine.isModelInstalled()) {
+            val path = llmEngine?.modelPath ?: "the model directory"
+            postSystemMessage("no offline model installed. copy a .litertlm model to $path", target)
+            return null
+        }
+        if (aiJob?.isActive == true) {
+            postSystemMessage("ai is still answering the previous question. /ai stop cancels it.", target)
+            return null
+        }
+        return llmEngine
+    }
+
+    // MARK: - Translation
+
+    private fun handleTranslateCommand(parts: List<String>, myPeerID: String) {
+        val target = captureConversationTarget()
+        val language = parts.drop(1).joinToString(" ").trim()
+        if (language.isNotEmpty()) translationLanguage = language
+
+        val message = lastIncomingMessage(target, myPeerID)
+        if (message == null) {
+            postSystemMessage("translate: no message from someone else to translate here.", target)
+            return
+        }
+        translate(message, target)
+    }
+
+    /**
+     * Translates [message] on the device into the last language used with /tr, or the device
+     * language. The result is a local system message in the conversation on screen.
+     */
+    fun translateMessage(message: BluewhaleMessage) {
+        translate(message, captureConversationTarget())
+    }
+
+    private fun translate(message: BluewhaleMessage, target: ConversationTarget) {
+        if (message.content.isBlank()) {
+            postSystemMessage("translate: that message has no text.", target)
+            return
+        }
+        val engine = readyEngineOrExplain(target) ?: return
+        val language = translationLanguage ?: TranslationPrompt.defaultTargetLanguage()
+
+        postSystemMessage("translating ${message.sender}'s message into $language…", target)
+        launchGeneration(engine, TranslationPrompt.build(message.content, language), target) { reply ->
+            val translated = TranslationPrompt.clean(reply)
+            if (translated.isBlank()) {
+                postSystemMessage("ai returned an empty response.", target)
+            } else {
+                postSystemMessage("${message.sender} ($language): $translated", target)
+            }
+        }
+    }
+
+    /** The newest text message in [target] that someone else sent. */
+    private fun lastIncomingMessage(target: ConversationTarget, myPeerID: String): BluewhaleMessage? {
+        val myNickname = state.getNicknameValue()
+        return conversationMessages(target).lastOrNull { m ->
+            m.sender != "system" &&
+                m.senderPeerID != myPeerID &&
+                !(m.senderPeerID == null && m.sender == myNickname) &&
+                m.type == com.bluewhale.android.model.BluewhaleMessageType.Message &&
+                m.content.isNotBlank()
         }
     }
 
@@ -442,23 +521,25 @@ class CommandProcessor(
 
     /** Recent messages of the target conversation, as background for the model. */
     private fun recentChatLines(target: ConversationTarget): List<AiConversationMemory.ChatLine> {
-        val messages = when {
-            target.privatePeer != null -> state.getPrivateChatsValue()[target.privatePeer].orEmpty()
-            target.channel != null -> state.getChannelMessagesValue()[target.channel].orEmpty()
-            // Location channel timelines are not held in ChatState
-            target.isLocationChannel -> emptyList()
-            else -> state.getMessagesValue()
-        }
-        return messages
+        return conversationMessages(target)
             .filter { it.sender != "system" && it.content.isNotBlank() }
             .takeLast(AiConversationMemory.MAX_CHAT_LINES)
             .map { AiConversationMemory.ChatLine(it.sender, it.content) }
+    }
+
+    private fun conversationMessages(target: ConversationTarget): List<BluewhaleMessage> = when {
+        target.privatePeer != null -> state.getPrivateChatsValue()[target.privatePeer].orEmpty()
+        target.channel != null -> state.getChannelMessagesValue()[target.channel].orEmpty()
+        // Location channel timelines are not held in ChatState
+        target.isLocationChannel -> emptyList()
+        else -> state.getMessagesValue()
     }
 
     /** Forgets all /ai context, e.g. on panic. */
     fun clearAiMemory() {
         aiJob?.cancel()
         aiMemory.clearAll()
+        translationLanguage = null
     }
 
     /** Peers cannot tell generated text from typed text, so mark it. */
