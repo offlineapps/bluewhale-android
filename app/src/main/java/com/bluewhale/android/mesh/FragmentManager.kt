@@ -179,7 +179,10 @@ class FragmentManager {
                 return null
             }
 
-            val fragmentIDString = fragmentPayload.getFragmentIDString()
+            // Fragments are unsigned, so a set is scoped to the sender that started it: a
+            // fragment ID seen on the air cannot be used to touch another sender's set.
+            val senderHex = packet.senderID.joinToString("") { "%02x".format(it) }
+            val fragmentIDString = "$senderHex:${fragmentPayload.getFragmentIDString()}"
             val limits = com.bluewhale.android.util.AppConstants.Fragmentation
 
             if (fragmentPayload.total > limits.MAX_FRAGMENTS_PER_ID) {
@@ -216,17 +219,23 @@ class FragmentManager {
                     if (set.total != fragmentPayload.total ||
                         set.type != fragmentPayload.originalType
                     ) {
-                        Log.w(TAG, "Rejecting fragment due to metadata mismatch for $fragmentIDString")
-                        removeSet(fragmentIDString)
+                        // Drop the odd fragment, not the set: one spoofed fragment must
+                        // not be able to cancel a transfer in progress.
+                        Log.w(TAG, "Ignoring fragment with mismatched metadata for $fragmentIDString")
                         return null
                     }
                 }
 
-                val existing = set.fragments[fragmentPayload.index]
-                val oldSize = existing?.size ?: 0
-                val newSize = fragmentPayload.data.size
+                // The first copy of an index wins. Relays deliver the same fragment many
+                // times, and letting a later copy overwrite an earlier one let anyone who
+                // saw the fragment ID corrupt the reassembled packet.
+                if (set.fragments[fragmentPayload.index] != null) {
+                    Log.d(TAG, "Ignoring duplicate fragment ${fragmentPayload.index} for $fragmentIDString")
+                    return null
+                }
 
-                val newTotalSizeOfSet = set.totalBytes - oldSize + newSize
+                val newSize = fragmentPayload.data.size
+                val newTotalSizeOfSet = set.totalBytes + newSize
 
                 if (newTotalSizeOfSet > limits.MAX_SET_BYTES) {
                     Log.w(TAG, "Rejecting fragment set $fragmentIDString for exceeding per-set limit")
@@ -234,7 +243,7 @@ class FragmentManager {
                     return null
                 }
 
-                val delta = (newSize - oldSize).toLong()
+                val delta = newSize.toLong()
 
                 synchronized(globalLock) {
                     if (globalBytes + delta > limits.MAX_GLOBAL_BYTES) {
@@ -247,10 +256,7 @@ class FragmentManager {
                     globalBytes += delta
                 }
 
-                if (existing == null) {
-                    set.receivedCount++
-                }
-
+                set.receivedCount++
                 set.fragments[fragmentPayload.index] = fragmentPayload.data
                 set.totalBytes = newTotalSizeOfSet
 
