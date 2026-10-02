@@ -920,6 +920,16 @@ class ChatViewModel(
         try {
             com.bluewhale.android.services.SeenMessageStore.getInstance(getApplication()).clear()
         } catch (_: Exception) { }
+
+        // Queued private messages outlive the mesh service; drop them so nothing written
+        // before the wipe is sent from the new identity.
+        try { com.bluewhale.android.services.MessageRouter.tryGetInstance()?.clearAll() } catch (_: Exception) { }
+
+        // The persisted channel goes with the prefs, but the live selection would keep the
+        // app in the last location channel until restart.
+        try {
+            com.bluewhale.android.geohash.LocationChannelManager.getInstance(getApplication()).clearPersistedChannel()
+        } catch (_: Exception) { }
         
         // Clear all mesh service data
         clearAllMeshServiceData()
