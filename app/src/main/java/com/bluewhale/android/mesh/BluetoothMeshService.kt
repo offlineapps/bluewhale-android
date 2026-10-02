@@ -74,6 +74,23 @@ class BluetoothMeshService(private val context: Context) {
         com.bluewhale.android.util.NotificationIntervalManager()
     )
     
+    // Courier mode: sealed private messages carried between parts of the mesh that are never
+    // connected at the same time. Our own envelopes are always carried; others' only when on.
+    private val courierService: com.bluewhale.android.courier.CourierService by lazy {
+        com.bluewhale.android.courier.CourierPreferenceManager.init(context)
+        com.bluewhale.android.courier.CourierService(
+            store = com.bluewhale.android.courier.CourierStore(
+                persistence = com.bluewhale.android.courier.FileCourierPersistence(context.applicationContext)
+            ),
+            myStaticPublicKey = { encryptionService.getStaticPublicKey() ?: ByteArray(32) },
+            seal = { key, plaintext, prologue -> encryptionService.sealForStaticKey(key, plaintext, prologue) },
+            open = { sealed, prologue -> encryptionService.openSealed(sealed, prologue) },
+            sendToNeighbours = { payload -> sendCourierPayload(payload) },
+            deliver = { delivery -> deliverCourierMessage(delivery) },
+            courierModeEnabled = { com.bluewhale.android.courier.CourierPreferenceManager.isEnabled() }
+        )
+    }
+
     // Service state management
     private var isActive = false
     
@@ -552,6 +569,13 @@ class BluetoothMeshService(private val context: Context) {
 
                             // Initial sync for this direct peer
                             try { gossipSyncManager.scheduleInitialSyncToPeer(pid, 1_000) } catch (_: Exception) { }
+
+                            // Hand over courier envelopes to the neighbour
+                            peerManager.getPeerInfo(pid)?.noisePublicKey?.let { key ->
+                                try { courierService.onNeighbour(key.joinToString("") { "%02x".format(it) }) } catch (e: Exception) {
+                                    Log.w(TAG, "Courier handover failed: ${e.message}")
+                                }
+                            }
                         }
                     }
                     // Track for sync
@@ -559,6 +583,16 @@ class BluetoothMeshService(private val context: Context) {
                 }
             }
             
+            override fun handleCourier(routed: RoutedPacket) {
+                serviceScope.launch {
+                    val fromKey = routed.peerID?.let { peerManager.getPeerInfo(it)?.noisePublicKey }
+                        ?.joinToString("") { "%02x".format(it) }
+                    try { courierService.onPayload(routed.packet.payload, fromKey) } catch (e: Exception) {
+                        Log.w(TAG, "Courier packet failed: ${e.message}")
+                    }
+                }
+            }
+
             override fun handleMessage(routed: RoutedPacket) {
                 serviceScope.launch { messageHandler.handleMessage(routed) }
                 // Track broadcast messages for sync
@@ -1526,6 +1560,71 @@ class BluetoothMeshService(private val context: Context) {
     
     // MARK: - Panic Mode Support
     
+    // MARK: - Courier
+
+    /**
+     * Sends [content] to [recipientPeerID] by courier: sealed to their static key and carried by
+     * people passing by. Returns false when their static key is unknown.
+     */
+    fun sendViaCourier(content: String, recipientPeerID: String, messageID: String, urgent: Boolean = false): Boolean {
+        val key = courierKeyFor(recipientPeerID) ?: return false
+        val nickname = try { com.bluewhale.android.services.NicknameProvider.getNickname(context, myPeerID) } catch (_: Exception) { myPeerID }
+        courierService.send(
+            recipientStaticKey = key,
+            messageId = messageID,
+            senderNickname = nickname,
+            content = content,
+            priority = if (urgent) com.bluewhale.android.courier.CourierEnvelope.Priority.URGENT
+                else com.bluewhale.android.courier.CourierEnvelope.Priority.NORMAL
+        )
+        return true
+    }
+
+    /** Envelopes this device is carrying right now, its own included. */
+    fun courierCarriedCount(): Int = try { courierService.carriedCount() } catch (_: Exception) { 0 }
+
+    private fun courierKeyFor(peerID: String): ByteArray? {
+        if (peerID.length == 64 && peerID.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
+            return hexStringToByteArray(peerID)
+        }
+        peerManager.getPeerInfo(peerID)?.noisePublicKey?.let { return it }
+        return try {
+            com.bluewhale.android.favorites.FavoritesPersistenceService.shared.getFavoriteStatus(peerID)?.peerNoisePublicKey
+        } catch (_: Exception) { null }
+    }
+
+    private fun sendCourierPayload(payload: ByteArray) {
+        val packet = BluewhalePacket(
+            version = 1u,
+            type = MessageType.COURIER.value,
+            senderID = hexStringToByteArray(myPeerID),
+            recipientID = SpecialRecipients.BROADCAST,
+            timestamp = System.currentTimeMillis().toULong(),
+            payload = payload,
+            signature = null,
+            ttl = 0u // neighbours only: carriers move envelopes, the mesh does not flood them
+        )
+        val signed = packet.toBinaryDataForSigning()?.let { encryptionService.signData(it) }
+            ?.let { packet.copy(signature = it) } ?: packet
+        connectionManager.broadcastPacket(RoutedPacket(signed))
+    }
+
+    private fun deliverCourierMessage(delivery: com.bluewhale.android.courier.CourierService.Delivery) {
+        val senderKeyHex = delivery.senderStaticKey.joinToString("") { "%02x".format(it) }
+        val message = BluewhaleMessage(
+            id = delivery.messageId,
+            sender = delivery.senderNickname,
+            content = delivery.content,
+            timestamp = java.util.Date(delivery.sentAt),
+            isRelay = true,
+            isPrivate = true,
+            recipientNickname = try { com.bluewhale.android.services.NicknameProvider.getNickname(context, myPeerID) } catch (_: Exception) { null },
+            // The sender's static key identifies them across sessions; their mesh ID may have rotated
+            senderPeerID = senderKeyHex
+        )
+        delegate?.didReceiveMessage(message)
+    }
+
     /**
      * Clear all internal mesh service data (for panic mode)
      */
@@ -1538,6 +1637,7 @@ class BluetoothMeshService(private val context: Context) {
             // Clear all managers
             fragmentManager.clearAllFragments()
             storeForwardManager.clearAllCache()
+            courierService.clear()
             securityManager.clearAllData()
             peerManager.clearAllPeers()
             peerManager.clearAllFingerprints()

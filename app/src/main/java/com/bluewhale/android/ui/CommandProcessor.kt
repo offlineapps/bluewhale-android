@@ -45,6 +45,7 @@ class CommandProcessor(
         CommandSuggestion("/block", emptyList(), "[nickname]", "block or list blocked peers"),
         CommandSuggestion("/channels", emptyList(), null, "show all discovered channels"),
         CommandSuggestion("/clear", emptyList(), null, "clear chat messages"),
+        CommandSuggestion("/courier", listOf("/courier!"), "<message>", "send by courier to someone out of reach"),
         CommandSuggestion("/hug", emptyList(), "<nickname>", "send someone a warm hug"),
         CommandSuggestion("/j", listOf("/join"), "<channel>", "join or create a channel"),
         CommandSuggestion("/m", listOf("/msg"), "<nickname> [message]", "send private message"),
@@ -64,6 +65,7 @@ class CommandProcessor(
         when (cmd) {
             "/ai" -> handleAiCommand(parts, meshService, myPeerID, onSendMessage)
             "/tr", "/translate" -> handleTranslateCommand(parts, myPeerID)
+            "/courier", "/courier!" -> handleCourierCommand(parts, meshService, myPeerID, urgent = cmd == "/courier!")
             "/j", "/join" -> handleJoinCommand(parts, myPeerID)
             "/m", "/msg" -> handleMessageCommand(parts, meshService)
             "/w" -> handleWhoCommand(meshService, viewModel)
@@ -540,6 +542,56 @@ class CommandProcessor(
         aiJob?.cancel()
         aiMemory.clearAll()
         translationLanguage = null
+    }
+
+    /**
+     * Seals a private message to the open conversation's contact and hands it to couriers:
+     * people passing by who carry it until it meets the recipient. "/courier!" marks it urgent.
+     */
+    private fun handleCourierCommand(parts: List<String>, meshService: BluetoothMeshService, myPeerID: String, urgent: Boolean) {
+        val target = captureConversationTarget()
+        val peer = target.privatePeer
+        if (peer == null) {
+            postSystemMessage("courier: open a private chat with the person first.", target)
+            return
+        }
+        val content = parts.drop(1).joinToString(" ").trim()
+        if (content.isEmpty()) {
+            postSystemMessage("usage: /courier <message> (or /courier! for urgent)", target)
+            return
+        }
+
+        val messageId = java.util.UUID.randomUUID().toString().uppercase()
+        val sent = try {
+            meshService.sendViaCourier(content, peer, messageId, urgent)
+        } catch (e: IllegalArgumentException) {
+            postSystemMessage("courier: ${e.message}", target)
+            return
+        }
+        if (!sent) {
+            postSystemMessage("courier: their key is not known yet. meet them once, or add them as a favourite.", target)
+            return
+        }
+
+        messageManager.addPrivateMessage(
+            peer,
+            BluewhaleMessage(
+                id = messageId,
+                sender = state.getNicknameValue() ?: myPeerID,
+                content = content,
+                timestamp = Date(),
+                isRelay = false,
+                isPrivate = true,
+                recipientNickname = getPeerNickname(peer, meshService),
+                senderPeerID = myPeerID,
+                deliveryStatus = com.bluewhale.android.model.DeliveryStatus.Sent
+            )
+        )
+        postSystemMessage(
+            "sealed and handed to couriers${if (urgent) " (urgent)" else ""}. it travels with people " +
+                "passing by and arrives within 3 days, or not at all.",
+            target
+        )
     }
 
     /** Peers cannot tell generated text from typed text, so mark it. */

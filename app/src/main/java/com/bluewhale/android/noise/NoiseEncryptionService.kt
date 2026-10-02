@@ -429,6 +429,14 @@ class NoiseEncryptionService(private val context: Context) {
         return verifySignature(signature, packetData, publicKey)
     }
 
+    /** Seals a courier envelope from our static identity to [recipientStaticKey] (Noise X). */
+    fun sealForStaticKey(recipientStaticKey: ByteArray, plaintext: ByteArray, prologue: ByteArray): ByteArray =
+        com.bluewhale.android.courier.CourierSeal.seal(staticIdentityPrivateKey, recipientStaticKey, plaintext, prologue)
+
+    /** Opens a courier envelope sealed to our static identity; null if it is not ours or was altered. */
+    fun openSealed(sealed: ByteArray, prologue: ByteArray): com.bluewhale.android.courier.CourierSeal.Opened? =
+        com.bluewhale.android.courier.CourierSeal.open(staticIdentityPrivateKey, sealed, prologue)
+
     /**
      * Sign data with our Ed25519 signing key
      */

@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Warning
@@ -505,6 +506,8 @@ fun AboutSheet(
                         val reduceBackgroundActivity by BackgroundActivityPreferenceManager.reduced.collectAsState()
                         LaunchedEffect(Unit) { com.bluewhale.android.mesh.StealthModePreferenceManager.init(context) }
                         val stealthEnabled by com.bluewhale.android.mesh.StealthModePreferenceManager.enabled.collectAsState()
+                        LaunchedEffect(Unit) { com.bluewhale.android.courier.CourierPreferenceManager.init(context) }
+                        val courierEnabled by com.bluewhale.android.courier.CourierPreferenceManager.enabled.collectAsState()
                         val torMode = remember { mutableStateOf(TorPreferenceManager.get(context)) }
                         val torProvider = remember { ArtiTorManager.getInstance() }
                         val torStatus by torProvider.statusFlow.collectAsState()
@@ -590,6 +593,20 @@ fun AboutSheet(
                                         color = colorScheme.outline.copy(alpha = 0.12f)
                                     )
                                     
+                                    // Courier mode: carry sealed messages for others
+                                    SettingsToggleRow(
+                                        icon = Icons.Filled.LocalShipping,
+                                        title = stringResource(R.string.about_courier_title),
+                                        subtitle = stringResource(R.string.about_courier_desc),
+                                        checked = courierEnabled,
+                                        onCheckedChange = { com.bluewhale.android.courier.CourierPreferenceManager.setEnabled(it) }
+                                    )
+
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+
                                     // Tor Toggle
                                     SettingsToggleRow(
                                         icon = Icons.Filled.Security,
