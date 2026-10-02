@@ -14,6 +14,10 @@ import java.nio.ByteOrder
  * Length field for TLV is 2 bytes (UInt16, big-endian) for all TLVs.
  * For large files, CONTENT is chunked into multiple TLVs of up to 65535 bytes each.
  *
+ * Unknown TLV types are skipped, not rejected, as iOS does. Rejecting the whole file over
+ * a tag this build does not know makes the format impossible to extend: a newer client
+ * adding one optional field would cost every older peer the entire file.
+ *
  * Note: The outer BluewhalePacket uses version 2 (4-byte payload length), so this
  * TLV payload can exceed 64 KiB even though each TLV value is limited to 65535 bytes.
  * Transport-level fragmentation then splits the final packet for BLE MTU.
@@ -26,7 +30,15 @@ data class BluewhaleFilePacket(
 ) {
     private enum class TLVType(val v: UByte) {
         FILE_NAME(0x01u), FILE_SIZE(0x02u), MIME_TYPE(0x03u), CONTENT(0x04u);
-        companion object { fun from(value: UByte) = values().find { it.v == value } }
+        companion object {
+            fun from(value: UByte): TLVType? = when (value) {
+                FILE_NAME.v -> FILE_NAME
+                FILE_SIZE.v -> FILE_SIZE
+                MIME_TYPE.v -> MIME_TYPE
+                CONTENT.v -> CONTENT
+                else -> null
+            }
+        }
     }
 
     fun encode(): ByteArray? {
@@ -90,8 +102,14 @@ data class BluewhaleFilePacket(
                 var size: Long? = null
                 var mime: String? = null
                 var contentBytes: ByteArray? = null
-                while (off + 3 <= data.size) { // minimum TLV header size (type + 2 bytes length)
-                    val t = TLVType.from(data[off].toUByte()) ?: return null
+                var skippedUnknownTLVs = 0
+                while (off < data.size) {
+                    // Every TLV needs a type and a 2-byte length; a truncated trailing
+                    // header is rejected rather than silently ignored.
+                    if (data.size - off < 3) return null
+                    // A null type is an unknown tag: its length is read like any other
+                    // 2-byte TLV and its value skipped.
+                    val t = TLVType.from(data[off].toUByte())
                     off += 1
                     // CONTENT uses 4-byte length; others use 2-byte length
                     val len: Int
@@ -105,6 +123,13 @@ data class BluewhaleFilePacket(
                         off += 2
                     }
                     if (len < 0 || off + len > data.size) return null
+                    if (t == null) {
+                        // No copy and no log per TLV: a sender can pad a packet with
+                        // 3-byte empty unknown TLVs, so per-TLV work is attacker scaled.
+                        off += len
+                        skippedUnknownTLVs += 1
+                        continue
+                    }
                     val value = data.copyOfRange(off, off + len)
                     off += len
                     when (t) {
@@ -123,6 +148,9 @@ data class BluewhaleFilePacket(
                             }
                         }
                     }
+                }
+                if (skippedUnknownTLVs > 0) {
+                    android.util.Log.d("BluewhaleFilePacket", "Skipped $skippedUnknownTLVs unknown TLV(s)")
                 }
                 val n = name ?: return null
                 val c = contentBytes ?: return null
