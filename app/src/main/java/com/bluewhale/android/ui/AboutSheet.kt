@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -261,6 +262,7 @@ fun AboutSheet(
     isPresented: Boolean,
     onDismiss: () -> Unit,
     onShowDebug: (() -> Unit)? = null,
+    onStealthModeChange: (Boolean) -> Unit = { com.bluewhale.android.mesh.StealthModePreferenceManager.setEnabled(it) },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -501,6 +503,8 @@ fun AboutSheet(
                         var backgroundEnabled by remember { mutableStateOf(com.bluewhale.android.service.MeshServicePreferences.isBackgroundEnabled(true)) }
                         LaunchedEffect(Unit) { BackgroundActivityPreferenceManager.init(context) }
                         val reduceBackgroundActivity by BackgroundActivityPreferenceManager.reduced.collectAsState()
+                        LaunchedEffect(Unit) { com.bluewhale.android.mesh.StealthModePreferenceManager.init(context) }
+                        val stealthEnabled by com.bluewhale.android.mesh.StealthModePreferenceManager.enabled.collectAsState()
                         val torMode = remember { mutableStateOf(TorPreferenceManager.get(context)) }
                         val torProvider = remember { ArtiTorManager.getInstance() }
                         val torStatus by torProvider.statusFlow.collectAsState()
@@ -551,6 +555,20 @@ fun AboutSheet(
                                         onCheckedChange = { enabled ->
                                             BackgroundActivityPreferenceManager.setReduced(enabled)
                                         }
+                                    )
+
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+
+                                    // Listen-only stealth mode
+                                    SettingsToggleRow(
+                                        icon = Icons.Filled.VisibilityOff,
+                                        title = stringResource(R.string.about_stealth_title),
+                                        subtitle = stringResource(R.string.about_stealth_desc),
+                                        checked = stealthEnabled,
+                                        onCheckedChange = { enabled -> onStealthModeChange(enabled) }
                                     )
 
                                     HorizontalDivider(

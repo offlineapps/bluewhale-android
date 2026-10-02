@@ -51,6 +51,11 @@ class ChatViewModel(
 
     companion object {
         private const val TAG = "ChatViewModel"
+        internal const val STEALTH_ON_NOTICE =
+            "stealth mode on: listening only. this device no longer advertises, announces, relays or sends over bluetooth."
+        internal const val STEALTH_OFF_NOTICE = "stealth mode off: visible on the mesh again."
+        internal const val STEALTH_PUBLIC_NOTICE = "stealth mode is on, so nothing was sent. turn it off in settings to talk."
+        internal const val STEALTH_PRIVATE_NOTICE = "stealth mode is on: this message waits until you turn it off."
     }
 
     fun sendVoiceNote(toPeerIDOrNull: String?, channelOrNull: String?, filePath: String) {
@@ -488,6 +493,19 @@ class ChatViewModel(
 
     
     // MARK: - Message Sending
+
+    private fun systemNotice(text: String) = BluewhaleMessage(
+        sender = "system",
+        content = text,
+        timestamp = Date(),
+        isRelay = false
+    )
+
+    /** Turns listen-only stealth mode on or off and says what it means in the chat. */
+    fun setStealthMode(enabled: Boolean) {
+        com.bluewhale.android.mesh.StealthModePreferenceManager.setEnabled(enabled)
+        messageManager.addMessage(systemNotice(if (enabled) STEALTH_ON_NOTICE else STEALTH_OFF_NOTICE))
+    }
     
     fun sendMessage(content: String) {
         if (content.isEmpty()) return
@@ -537,6 +555,11 @@ class ChatViewModel(
                     }
                 }
             }
+            if (com.bluewhale.android.mesh.StealthModePreferenceManager.isEnabled()) {
+                // Mesh delivery needs a handshake, which stealth suppresses: the message waits in
+                // the outbox (or goes over Nostr for a mutual favourite) until stealth is off
+                messageManager.addPrivateMessage(selectedPeer, systemNotice(STEALTH_PRIVATE_NOTICE))
+            }
             // Send private message
             val recipientNickname = meshService.getPeerNicknames()[selectedPeer]
             privateChatManager.sendPrivateMessage(
@@ -556,6 +579,14 @@ class ChatViewModel(
             if (selectedLocationChannel is com.bluewhale.android.geohash.ChannelID.Location) {
                 // Send to geohash channel via Nostr ephemeral event
                 geohashViewModel.sendGeohashMessage(content, selectedLocationChannel.channel, meshService.myPeerID, state.getNicknameValue())
+            } else if (com.bluewhale.android.mesh.StealthModePreferenceManager.isEnabled()) {
+                // Listen-only: nothing goes out over Bluetooth, so do not pretend it was sent
+                val notice = systemNotice(STEALTH_PUBLIC_NOTICE)
+                if (currentChannelValue != null) {
+                    channelManager.addChannelMessage(currentChannelValue, notice, null)
+                } else {
+                    messageManager.addMessage(notice)
+                }
             } else {
                 // Send public/channel message via mesh
                 val message = BluewhaleMessage(

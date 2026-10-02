@@ -139,6 +139,7 @@ class BluetoothPacketBroadcaster(
         gattServer: BluetoothGattServer?,
         characteristic: BluetoothGattCharacteristic?
     ) {
+        if (silencedByStealth(routed)) return
         val packet = routed.packet
         val isFile = packet.type == MessageType.FILE_TRANSFER.value
         if (isFile) {
@@ -206,6 +207,17 @@ class BluetoothPacketBroadcaster(
         }
     }
 
+    /**
+     * Listen-only stealth mode: every packet this device would put on the air, whether
+     * originated (announce, message, receipt, handshake, sync) or relayed, is dropped here,
+     * the single path to the radio.
+     */
+    private fun silencedByStealth(routed: RoutedPacket): Boolean {
+        if (!StealthModePreferenceManager.isEnabled()) return false
+        Log.d(TAG, "stealth: not transmitting type ${routed.packet.type}")
+        return true
+    }
+
     fun cancelTransfer(transferId: String): Boolean {
         val job = transferJobs.remove(transferId) ?: return false
         job.cancel()
@@ -222,6 +234,7 @@ class BluetoothPacketBroadcaster(
         gattServer: BluetoothGattServer?,
         characteristic: BluetoothGattCharacteristic?
     ): Boolean {
+        if (silencedByStealth(routed)) return false
         val packet = routed.packet
         val data = packet.toBinaryData() ?: return false
         val isFile = packet.type == MessageType.FILE_TRANSFER.value
@@ -287,6 +300,7 @@ class BluetoothPacketBroadcaster(
         gattServer: BluetoothGattServer?,
         characteristic: BluetoothGattCharacteristic?
     ) {
+        if (silencedByStealth(routed)) return
         // Submit broadcast request to actor for serialized processing
         broadcasterScope.launch {
             try {
@@ -309,6 +323,7 @@ class BluetoothPacketBroadcaster(
         gattServer: BluetoothGattServer?,
         characteristic: BluetoothGattCharacteristic?
     ): Boolean {
+        if (silencedByStealth(routed)) return false
         val packet = routed.packet
         val data = packet.toBinaryData() ?: return false
         val typeName = MessageType.fromValue(packet.type)?.name ?: packet.type.toString()

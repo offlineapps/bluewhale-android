@@ -507,7 +507,8 @@ private fun ChatDialogs(
     AboutSheet(
         isPresented = showAppInfo,
         onDismiss = onAppInfoDismiss,
-        onShowDebug = { showDebugSheet = true }
+        onShowDebug = { showDebugSheet = true },
+        onStealthModeChange = { viewModel.setStealthMode(it) }
     )
     if (showDebugSheet) {
         com.bluewhale.android.ui.debug.DebugSettingsSheet(
