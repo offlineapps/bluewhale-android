@@ -177,7 +177,7 @@ class BluetoothGattClientManager(
                             Log.w(TAG, "Failed to request RSSI from ${deviceConn.device.address}: ${e.message}")
                         }
                     }
-                    delay(RssiPollScheduler.nextDelayMs(clients.size))
+                    delay(RssiPollScheduler.nextDelayMs(clients.size, com.bluewhale.android.find.FindMode.isActive))
                 } catch (e: Exception) {
                     Log.w(TAG, "Error in RSSI monitoring: ${e.message}")
                     delay(AppConstants.Mesh.RSSI_UPDATE_INTERVAL_MS)

@@ -179,6 +179,13 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                 com.bluewhale.android.model.NoisePayloadType.PEER_STATE -> {
                     handleAuthenticatedPeerState(peerID, noisePayload.data)
                 }
+                com.bluewhale.android.model.NoisePayloadType.FIND_RING -> {
+                    delegate?.onFindRingReceived(peerID)
+                }
+                com.bluewhale.android.model.NoisePayloadType.LOCATION_SHARE -> {
+                    val position = com.bluewhale.android.find.SharedPosition.decode(noisePayload.data)
+                    if (position != null) delegate?.onPositionShared(peerID, position)
+                }
                 com.bluewhale.android.model.NoisePayloadType.VERIFY_CHALLENGE -> {
                     Log.d(TAG, "🔐 Verify challenge received from $peerID (${noisePayload.data.size} bytes)")
                     delegate?.onVerifyChallengeReceived(peerID, noisePayload.data, packet.timestamp.toLong())
@@ -746,4 +753,6 @@ interface MessageHandlerDelegate {
     fun onReadReceiptReceived(messageID: String, peerID: String)
     fun onVerifyChallengeReceived(peerID: String, payload: ByteArray, timestampMs: Long)
     fun onVerifyResponseReceived(peerID: String, payload: ByteArray, timestampMs: Long)
+    fun onFindRingReceived(peerID: String) {}
+    fun onPositionShared(peerID: String, position: com.bluewhale.android.find.SharedPosition) {}
 }

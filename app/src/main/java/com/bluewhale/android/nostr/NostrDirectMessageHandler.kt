@@ -194,6 +194,9 @@ class NostrDirectMessageHandler(
             NoisePayloadType.VERIFY_RESPONSE -> Unit // Ignore verification payloads in Nostr direct messages
             // Only meaningful inside a Noise session, where the static key attributes it
             NoisePayloadType.PEER_STATE -> Unit
+            // Finding someone is about being near them, so it only makes sense over the mesh
+            NoisePayloadType.FIND_RING,
+            NoisePayloadType.LOCATION_SHARE -> Unit
         }
     }
 

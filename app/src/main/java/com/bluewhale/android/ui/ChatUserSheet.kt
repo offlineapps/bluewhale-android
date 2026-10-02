@@ -111,6 +111,23 @@ fun ChatUserSheet(
 
                     // Only show user actions for other users' messages or when no message is selected
                     if (selectedMessage?.sender != viewModel.nickname.value) {
+                        // Find them in a crowd: warmer/colder from the Bluetooth signal
+                        val findPeerID = selectedMessage?.senderPeerID?.takeIf { it.length == 16 }
+                            ?: viewModel.meshService.getPeerNicknames().entries.firstOrNull { it.value == targetNickname }?.key
+                        if (findPeerID != null) {
+                            item {
+                                UserActionRow(
+                                    title = stringResource(R.string.action_find_title, targetNickname),
+                                    subtitle = stringResource(R.string.action_find_subtitle),
+                                    titleColor = standardPrimary,
+                                    onClick = {
+                                        viewModel.openFindFriend(findPeerID)
+                                        onDismiss()
+                                    }
+                                )
+                            }
+                        }
+
                         // Slap action
                         item {
                             UserActionRow(

@@ -35,6 +35,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   mesh timeline or to a private chat with an established session, and the voice note still goes
   out on release. Incoming bursts are marked LIVE and play in the foreground conversation. A
   settings toggle turns it off. See `docs/push_to_talk.md`.
+- Find a friend in a crowd, offline: a warmer/colder finder from the Bluetooth signal with haptic
+  pulses, "ring their phone" (favourites only), and a one-shot encrypted GPS position swap. Open
+  it from a message, a nickname, or `/find <name>`. See `docs/find_friend.md`.
 
 ### Fixed
 - A timed-out `/ai` question kept running on the model, so the next question waited behind it

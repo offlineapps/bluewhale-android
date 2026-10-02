@@ -292,6 +292,24 @@ class LocationChannelManager private constructor(private val context: Context) {
 
     // MARK: - Location Operations
 
+    /**
+     * A recent position for finding a friend: the last known fix, else a fresh one. GPS works
+     * without a network connection. Null without permission or a fix.
+     */
+    fun currentLocation(callback: (Location?) -> Unit) {
+        if (!checkAndSyncPermission()) {
+            callback(null)
+            return
+        }
+        locationProvider.getLastKnownLocation { cached ->
+            if (cached != null && System.currentTimeMillis() - cached.time < 2 * 60 * 1000L) {
+                callback(cached)
+            } else {
+                locationProvider.requestFreshLocation { fresh -> callback(fresh ?: cached) }
+            }
+        }
+    }
+
     private fun requestOneShotLocation() {
         if (!checkAndSyncPermission()) {
             Log.w(TAG, "No location permission for one-shot request")
