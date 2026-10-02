@@ -70,6 +70,60 @@ object AppStateStore {
         }
     }
 
+    /** Replaces a live media row by ID, or appends it if the row was not admitted yet. */
+    fun upsertPublicMessage(msg: BluewhaleMessage) {
+        synchronized(this) {
+            val index = _publicMessages.value.indexOfFirst { it.id == msg.id }
+            if (index >= 0) {
+                _publicMessages.value = _publicMessages.value.toMutableList().also { it[index] = msg }
+            } else {
+                seenMessageIds.add(msg.id)
+                _publicMessages.value = _publicMessages.value + msg
+            }
+        }
+    }
+
+    fun removePublicMessage(messageID: String) {
+        synchronized(this) {
+            if (_publicMessages.value.none { it.id == messageID }) return
+            _publicMessages.value = _publicMessages.value.filterNot { it.id == messageID }
+            seenMessageIds.remove(messageID)
+        }
+    }
+
+    /** Replace-or-append used by a live voice row as its partial file becomes final media. */
+    fun upsertPrivateMessage(peerID: String, msg: BluewhaleMessage) {
+        synchronized(this) {
+            val map = _privateMessages.value.toMutableMap()
+            val messages = map[peerID].orEmpty().toMutableList()
+            val index = messages.indexOfFirst { it.id == msg.id }
+            if (index >= 0) {
+                messages[index] = msg
+            } else {
+                messages += msg
+                seenMessageIds.add(msg.id)
+            }
+            map[peerID] = messages
+            _privateMessages.value = map
+        }
+    }
+
+    fun removePrivateMessage(messageID: String) {
+        synchronized(this) {
+            var changed = false
+            val map = _privateMessages.value.mapValues { (_, list) ->
+                if (list.any { it.id == messageID }) {
+                    changed = true
+                    list.filterNot { it.id == messageID }
+                } else list
+            }
+            if (changed) {
+                _privateMessages.value = map
+                seenMessageIds.remove(messageID)
+            }
+        }
+    }
+
     private fun statusPriority(status: DeliveryStatus?): Int = when (status) {
         null -> 0
         is DeliveryStatus.Sending -> 1

@@ -62,6 +62,38 @@ class ChatViewModel(
         mediaSendingManager.sendVoiceNote(toPeerIDOrNull, channelOrNull, filePath)
     }
 
+    /**
+     * The recorder for one press of the mic button. When there is a live route it also streams
+     * push-to-talk: Noise-encrypted to a DM peer with an established session, or to the public
+     * mesh when peers are connected. Channels and offline contacts get a plain voice note.
+     */
+    fun createVoiceRecorder(toPeerIDOrNull: String?, channelOrNull: String?): com.bluewhale.android.features.voice.VoiceRecorder {
+        val context = getApplication<Application>().applicationContext
+        if (!com.bluewhale.android.features.voice.LiveVoicePreferences.isEnabled(context)) {
+            return com.bluewhale.android.features.voice.VoiceRecorder(context)
+        }
+        val recipientPeerID = toPeerIDOrNull?.let { liveMeshPeerFor(it) }
+        val liveTarget = when {
+            toPeerIDOrNull != null && recipientPeerID != null && meshService.hasEstablishedSession(recipientPeerID) ->
+                com.bluewhale.android.features.voice.LiveVoiceTarget { payload -> meshService.sendVoiceFrame(recipientPeerID, payload) }
+            toPeerIDOrNull == null && channelOrNull == null && meshService.getActivePeerCount() > 0 ->
+                com.bluewhale.android.features.voice.LiveVoiceTarget { payload -> meshService.sendVoiceFrame(null, payload) }
+            else -> null
+        }
+        return com.bluewhale.android.features.voice.VoiceRecorder(context, liveTarget)
+    }
+
+    /** The connected mesh peer behind a conversation ID (mesh ID, or 64-hex Noise key). */
+    private fun liveMeshPeerFor(conversationPeerID: String): String? {
+        if (meshService.getPeerInfo(conversationPeerID)?.isConnected == true) return conversationPeerID
+        if (conversationPeerID.length != 64) return null
+        return meshService.getPeerNicknames().keys.firstOrNull { pid ->
+            meshService.getPeerInfo(pid)?.noisePublicKey
+                ?.joinToString("") { "%02x".format(it) }
+                .equals(conversationPeerID, ignoreCase = true)
+        }
+    }
+
     fun sendFileNote(toPeerIDOrNull: String?, channelOrNull: String?, filePath: String) {
         mediaSendingManager.sendFileNote(toPeerIDOrNull, channelOrNull, filePath)
     }
@@ -981,6 +1013,9 @@ class ChatViewModel(
         // Forget /ai conversation context and stop any generation
         commandProcessor.clearAiMemory()
         
+        // Drop live voice in progress and its partial files
+        try { com.bluewhale.android.features.voice.LiveVoiceManager.getInstance(getApplication()).reset() } catch (_: Exception) { }
+
         // Clear seen message store
         try {
             com.bluewhale.android.services.SeenMessageStore.getInstance(getApplication()).clear()

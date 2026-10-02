@@ -171,6 +171,8 @@ fun MessageInput(
     currentChannel: String?,
     nickname: String,
     showMediaButtons: Boolean,
+    recorderFactory: ((String?, String?) -> com.bluewhale.android.features.voice.VoiceRecorder)? = null,
+    activePublicTalker: String? = null,
     modifier: Modifier = Modifier
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -179,6 +181,7 @@ fun MessageInput(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     var isRecording by remember { mutableStateOf(false) }
+    var isLiveRecording by remember { mutableStateOf(false) }
     var elapsedMs by remember { mutableStateOf(0L) }
     var amplitude by remember { mutableStateOf(0) }
 
@@ -218,7 +221,10 @@ fun MessageInput(
             // Show placeholder when there's no text and not recording
             if (value.text.isEmpty() && !isRecording) {
                 Text(
-                    text = stringResource(R.string.type_a_message_placeholder),
+                    // Someone is talking live on the public mesh: say so, so we do not talk over them
+                    text = if (selectedPrivatePeer == null && currentChannel == null && activePublicTalker != null) {
+                        "$activePublicTalker is live"
+                    } else stringResource(R.string.type_a_message_placeholder),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontFamily = FontFamily.Monospace
                     ),
@@ -242,7 +248,8 @@ fun MessageInput(
                     val maxMm = maxSecs / 60
                     val maxSs = maxSecs % 60
                     Text(
-                        text = String.format("%02d:%02d / %02d:%02d", mm, ss, maxMm, maxSs),
+                        text = (if (isLiveRecording) "LIVE · " else "") +
+                            String.format("%02d:%02d / %02d:%02d", mm, ss, maxMm, maxSs),
                         fontFamily = FontFamily.Monospace,
                         color = colorScheme.primary,
                         fontSize = (BASE_FONT_SIZE - 4).sp
@@ -285,8 +292,12 @@ fun MessageInput(
 
             VoiceRecordButton(
                 backgroundColor = bg,
-                onStart = {
+                recorderFactory = recorderFactory?.let { factory ->
+                    { factory(latestSelectedPeer.value, latestChannel.value) }
+                },
+                onStart = { live ->
                     isRecording = true
+                    isLiveRecording = live
                     elapsedMs = 0L
                     // Keep existing focus to avoid IME collapse, but do not force-show keyboard
                     if (isFocused.value) {
@@ -299,6 +310,7 @@ fun MessageInput(
                 },
                 onFinish = { path ->
                     isRecording = false
+                    isLiveRecording = false
                     // Extract and cache waveform from the actual audio file to match receiver rendering
                     AudioWaveformExtractor.extractAsync(path, sampleCount = 120) { arr ->
                         if (arr != null) {

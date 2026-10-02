@@ -56,6 +56,9 @@ class BluetoothMeshService(private val context: Context) {
     private val messageHandler = MessageHandler(myPeerID, context.applicationContext)
     internal val connectionManager = BluetoothConnectionManager(context, myPeerID, fragmentManager) // Made internal for access
     private val packetProcessor = PacketProcessor(myPeerID)
+    // Live push-to-talk frames, sent in order off the capture thread
+    private data class VoiceFrameRequest(val recipientPeerID: String?, val payload: ByteArray)
+    private val voiceFrameQueue = kotlinx.coroutines.channels.Channel<VoiceFrameRequest>(capacity = 128)
 
     // Debug only: feeds signed make believe traffic into the local pipeline. Never transmits.
     private val simulatedPeerEngine by lazy {
@@ -103,6 +106,9 @@ class BluetoothMeshService(private val context: Context) {
     private var terminated = false
     
     init {
+        serviceScope.launch {
+            for (request in voiceFrameQueue) dispatchVoiceFrame(request)
+        }
         Log.i(TAG, "Initializing BluetoothMeshService for peer=$myPeerID")
         VerificationService.configure(encryptionService)
         setupDelegates()
@@ -592,6 +598,8 @@ class BluetoothMeshService(private val context: Context) {
                     }
                 }
             }
+            override fun handleVoiceFrame(routed: RoutedPacket): Boolean =
+                messageHandler.handlePublicVoiceFrame(routed)
 
             override fun handleMessage(routed: RoutedPacket) {
                 serviceScope.launch { messageHandler.handleMessage(routed) }
@@ -1623,6 +1631,49 @@ class BluetoothMeshService(private val context: Context) {
             senderPeerID = senderKeyHex
         )
         delegate?.didReceiveMessage(message)
+    }
+
+    // MARK: - Live push-to-talk
+
+    /** Queues one live voice packet: public mesh when [recipientPeerID] is null, else Noise-encrypted. */
+    fun sendVoiceFrame(recipientPeerID: String?, payload: ByteArray) {
+        if (payload.isEmpty()) return
+        voiceFrameQueue.trySend(VoiceFrameRequest(recipientPeerID, payload.copyOf()))
+    }
+
+    private fun dispatchVoiceFrame(request: VoiceFrameRequest) {
+        try {
+            val recipientPeerID = request.recipientPeerID
+            val packet = if (recipientPeerID == null) {
+                BluewhalePacket(
+                    version = 1u,
+                    type = MessageType.VOICE_FRAME.value,
+                    senderID = hexStringToByteArray(myPeerID),
+                    recipientID = SpecialRecipients.BROADCAST,
+                    timestamp = System.currentTimeMillis().toULong(),
+                    payload = request.payload,
+                    signature = null,
+                    ttl = MAX_TTL
+                )
+            } else {
+                if (!encryptionService.hasEstablishedSession(recipientPeerID)) return
+                val plaintext = NoisePayload(NoisePayloadType.VOICE_FRAME, request.payload).encode()
+                val ciphertext = encryptionService.encrypt(plaintext, recipientPeerID)
+                BluewhalePacket(
+                    version = 1u,
+                    type = MessageType.NOISE_ENCRYPTED.value,
+                    senderID = hexStringToByteArray(myPeerID),
+                    recipientID = hexStringToByteArray(recipientPeerID),
+                    timestamp = System.currentTimeMillis().toULong(),
+                    payload = ciphertext,
+                    signature = null,
+                    ttl = MAX_TTL
+                )
+            }
+            connectionManager.broadcastPacket(RoutedPacket(signPacketBeforeBroadcast(packet)))
+        } catch (e: Exception) {
+            Log.w(TAG, "Live voice frame send failed: ${e.message}")
+        }
     }
 
     /**

@@ -9,6 +9,8 @@ import com.bluewhale.android.noise.NoisePeerIdentity
 import com.bluewhale.android.protocol.BluewhalePacket
 import com.bluewhale.android.protocol.MessageType
 import com.bluewhale.android.util.toHexString
+import com.bluewhale.android.features.voice.LiveVoiceManager
+import com.bluewhale.android.features.voice.LiveVoiceScope
 import kotlinx.coroutines.*
 import java.util.*
 import kotlin.random.Random
@@ -136,7 +138,10 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                         )
 
                         Log.d(TAG, "📄 Saved encrypted incoming file to $savedPath (msgId=$uniqueMsgId)")
-                        delegate?.onMessageReceived(message)
+                        // A voice note that was already heard live replaces its live row instead
+                        if (!LiveVoiceManager.getInstance(appContext).absorbFinalizedVoiceNote(message)) {
+                            delegate?.onMessageReceived(message)
+                        }
 
                         // Send delivery ACK with generated message ID
                         sendDeliveryAck(uniqueMsgId, peerID)
@@ -161,6 +166,15 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                     
                     // Simplified: Call delegate with messageID and peerID directly
                     delegate?.onReadReceiptReceived(messageID, peerID)
+                }
+                com.bluewhale.android.model.NoisePayloadType.VOICE_FRAME -> {
+                    LiveVoiceManager.getInstance(appContext).handleFrame(
+                        peerID = peerID,
+                        nickname = delegate?.getPeerNickname(peerID) ?: peerID,
+                        scope = LiveVoiceScope.DIRECT_MESSAGE,
+                        payload = noisePayload.data,
+                        timestampMs = packet.timestamp.toLong()
+                    )
                 }
                 com.bluewhale.android.model.NoisePayloadType.PEER_STATE -> {
                     handleAuthenticatedPeerState(peerID, noisePayload.data)
@@ -484,7 +498,9 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                     timestamp = Date(packet.timestamp.toLong())
                 )
                 Log.d(TAG, "📄 Saved incoming file to $savedPath")
-                delegate?.onMessageReceived(message)
+                if (!LiveVoiceManager.getInstance(appContext).absorbFinalizedVoiceNote(message)) {
+                    delegate?.onMessageReceived(message)
+                }
                 return
             } else if (isFileTransfer) {
                 Log.w(TAG, "⚠️ FILE_TRANSFER decode failed (broadcast) from ${peerID.take(8)} payloadSize=${packet.payload.size}")
@@ -505,6 +521,27 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         }
     }
     
+    /** Validates and ingests an ephemeral public push-to-talk frame. */
+    fun handlePublicVoiceFrame(routed: RoutedPacket): Boolean {
+        val packet = routed.packet
+        val peerID = routed.peerID ?: return false
+        if (peerID == myPeerID) return true
+        val recipient = packet.recipientID
+        if (recipient != null && !recipient.contentEquals(delegate?.getBroadcastRecipient())) return false
+        if (packet.timestamp > Long.MAX_VALUE.toULong()) return false
+        val ageMs = System.currentTimeMillis() - packet.timestamp.toLong()
+        if (ageMs !in -30_000L..30_000L) return false
+        val peerInfo = delegate?.getPeerInfo(peerID)
+        if (peerInfo == null || !peerInfo.isVerifiedNickname) return false
+        return LiveVoiceManager.getInstance(appContext).handleFrame(
+            peerID = peerID,
+            nickname = delegate?.getPeerNickname(peerID) ?: peerID,
+            scope = LiveVoiceScope.PUBLIC_MESH,
+            payload = packet.payload,
+            timestampMs = packet.timestamp.toLong()
+        )
+    }
+
     /**
      * Handle (decrypted) private message addressed to us
      */
@@ -535,7 +572,9 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                     recipientNickname = delegate?.getMyNickname()
                 )
                 Log.d(TAG, "📄 Saved incoming file to $savedPath")
-                delegate?.onMessageReceived(message)
+                if (!LiveVoiceManager.getInstance(appContext).absorbFinalizedVoiceNote(message)) {
+                    delegate?.onMessageReceived(message)
+                }
                 return
             } else if (isFileTransfer) {
                 Log.w(TAG, "⚠️ FILE_TRANSFER decode failed (private) from ${peerID.take(8)} payloadSize=${packet.payload.size}")

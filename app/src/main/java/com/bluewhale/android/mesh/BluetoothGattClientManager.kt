@@ -532,6 +532,17 @@ class BluetoothGattClientManager(
                 }
             }
             
+            override fun onCharacteristicWrite(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                status: Int
+            ) {
+                // Frees the link's GATT queue for the next write
+                if (characteristic.uuid == AppConstants.Mesh.Gatt.CHARACTERISTIC_UUID) {
+                    delegate?.onGattClientWriteComplete(gatt.device.address, status)
+                }
+            }
+
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
                 val value = characteristic.value
                 Log.i(TAG, "Client: Received packet from ${gatt.device.address}, size: ${value.size} bytes")
