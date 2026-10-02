@@ -5,6 +5,14 @@ import android.util.Log
 import com.bluewhale.android.mesh.BluetoothMeshService
 import com.bluewhale.android.model.ReadReceipt
 import com.bluewhale.android.nostr.NostrTransport
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Routes messages between BLE mesh and Nostr transports, matching iOS behavior.
@@ -14,9 +22,29 @@ class MessageRouter private constructor(
     private var mesh: BluetoothMeshService,
     private val nostr: NostrTransport
 ) {
+    private data class QueuedMessage(
+        val content: String,
+        val nickname: String,
+        val messageID: String,
+        val enqueuedAtMs: Long
+    )
+
+    private data class ConversationRetry(
+        val handshakeAttempts: Int,
+        val nextHandshakeAttemptAtMs: Long
+    )
+
     companion object {
         private const val TAG = "MessageRouter"
+        private const val OUTBOX_TICK_MS = 2_000L
+        // A queued message is given up on after a day, so a contact who never comes back
+        // does not hold it, or its plaintext, forever.
+        internal const val OUTBOX_MESSAGE_TTL_MS = 86_400_000L
+        internal const val OUTBOX_MAX_PER_PEER = 100
+        private val HANDSHAKE_RETRY_BACKOFF_MS = longArrayOf(5_000L, 15_000L, 30_000L, 60_000L)
+
         @Volatile private var INSTANCE: MessageRouter? = null
+        internal var disableSchedulerForTesting = false
         fun tryGetInstance(): MessageRouter? = INSTANCE
         fun getInstance(context: Context, mesh: BluetoothMeshService): MessageRouter {
             val instance = INSTANCE ?: synchronized(this) {
@@ -36,10 +64,30 @@ class MessageRouter private constructor(
             instance.nostr.senderPeerID = mesh.myPeerID
             return instance
         }
+
+        internal fun resetForTesting() {
+            INSTANCE?.schedulerScope?.cancel()
+            INSTANCE = null
+        }
     }
 
-    // Outbox: peerID -> queued (content, nickname, messageID)
-    private val outbox = mutableMapOf<String, MutableList<Triple<String, String, String>>>()
+    // Outbox: peerID -> queued messages, oldest first
+    private val outbox = ConcurrentHashMap<String, MutableList<QueuedMessage>>()
+
+    // Per-peer handshake retry state for queued messages
+    private val retryState = ConcurrentHashMap<String, ConversationRetry>()
+
+    private val schedulerScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    // Injectable for tests
+    internal var clock: () -> Long = { System.currentTimeMillis() }
+
+    /** Called with the ID of a queued message that expired or was evicted before delivery. */
+    var onMessageExpired: ((String) -> Unit)? = null
+
+    init {
+        if (!disableSchedulerForTesting) startOutboxScheduler()
+    }
 
     // Listener for favorites changes to flush outbox when npub mapping appears/changes
     private val favoriteListener = object: com.bluewhale.android.favorites.FavoritesChangeListener {
@@ -62,6 +110,7 @@ class MessageRouter private constructor(
      */
     fun clearAll() {
         outbox.clear()
+        retryState.clear()
         Log.d(TAG, "Cleared all queued outbox messages")
     }
 
@@ -90,10 +139,9 @@ class MessageRouter private constructor(
             nostr.sendPrivateMessage(content, toPeerID, recipientNickname, messageID)
         } else {
             Log.d(TAG, "Queued PM for ${toPeerID} (no mesh, no Nostr mapping) msg_id=${messageID.take(8)}…")
-            val q = outbox.getOrPut(toPeerID) { mutableListOf() }
-            q.add(Triple(content, recipientNickname, messageID))
+            enqueue(toPeerID, QueuedMessage(content, recipientNickname, messageID, clock()))
             Log.d(TAG, "Initiating noise handshake after queueing PM for ${toPeerID.take(8)}…")
-            mesh.initiateNoiseHandshake(toPeerID)
+            kickHandshake(toPeerID, immediate = true)
         }
     }
 
@@ -138,9 +186,20 @@ class MessageRouter private constructor(
         val queued = outbox[peerID] ?: return
         if (queued.isEmpty()) return
         Log.d(TAG, "Flushing outbox for ${peerID.take(8)}… count=${queued.size}")
+        synchronized(queued) { flushLocked(peerID, queued) }
+        if (queued.isEmpty()) {
+            outbox.remove(peerID, queued)
+            retryState.remove(peerID)
+        }
+    }
+
+    private fun flushLocked(peerID: String, queued: MutableList<QueuedMessage>) {
         val iterator = queued.iterator()
         while (iterator.hasNext()) {
-            val (content, nickname, messageID) = iterator.next()
+            val entry = iterator.next()
+            val content = entry.content
+            val nickname = entry.nickname
+            val messageID = entry.messageID
             var hasMesh = mesh.getPeerInfo(peerID)?.isConnected == true && mesh.hasEstablishedSession(peerID)
             // If this is a noiseHex key, see if there is a connected mesh peer for this identity
             if (!hasMesh && peerID.length == 64 && peerID.matches(Regex("^[0-9a-fA-F]+$"))) {
@@ -160,8 +219,89 @@ class MessageRouter private constructor(
                 iterator.remove()
             }
         }
+    }
+
+    @Synchronized
+    private fun enqueue(peerID: String, entry: QueuedMessage) {
+        val queue = outbox.getOrPut(peerID) { mutableListOf() }
+        synchronized(queue) {
+            queue.add(entry)
+            while (queue.size > OUTBOX_MAX_PER_PEER) {
+                val evicted = queue.removeAt(0)
+                Log.w(TAG, "Outbox full for ${peerID.take(8)}…; evicting oldest msg_id=${evicted.messageID.take(8)}…")
+                notifyExpired(evicted.messageID)
+            }
+        }
+    }
+
+    private fun notifyExpired(messageID: String) {
+        try { onMessageExpired?.invoke(messageID) } catch (_: Exception) { }
+    }
+
+    /**
+     * Starts a Noise handshake for a peer we owe queued messages, backing off between
+     * attempts. [immediate] resets the backoff (a message was just queued or the peer just
+     * reappeared). While a previous attempt is inside its backoff window nothing is sent,
+     * so frequent peer list updates cannot flood the peer with handshakes.
+     */
+    @Synchronized
+    private fun kickHandshake(peerID: String, immediate: Boolean) {
+        val now = clock()
+        val current = retryState[peerID]
+        if (current != null && now < current.nextHandshakeAttemptAtMs) return
+        val attempts = if (immediate) 0 else (current?.handshakeAttempts ?: 0)
+        try { mesh.initiateNoiseHandshake(peerID) } catch (_: Exception) { }
+        val backoff = HANDSHAKE_RETRY_BACKOFF_MS[attempts.coerceAtMost(HANDSHAKE_RETRY_BACKOFF_MS.size - 1)]
+        retryState[peerID] = ConversationRetry(attempts + 1, now + backoff)
+    }
+
+    private fun startOutboxScheduler() {
+        schedulerScope.launch {
+            while (isActive) {
+                delay(OUTBOX_TICK_MS)
+                try { tickOutbox() } catch (e: Exception) {
+                    Log.w(TAG, "Outbox scheduler tick failed: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * One pass over the outbox: expire old entries, flush what can be sent, and retry the
+     * handshake with backoff for peers that are connected but have no session yet. Queued
+     * messages used to wait for a UI poll or a peer list change, and a lost handshake was
+     * never retried, so they could sit forever while the peer stood right there.
+     */
+    internal fun tickOutbox(nowMs: Long = clock()) {
+        outbox.keys.toList().forEach { peerID ->
+            expireOldEntries(peerID, nowMs)
+            val queued = outbox[peerID] ?: return@forEach
+            if (queued.isEmpty()) return@forEach
+            val connected = mesh.getPeerInfo(peerID)?.isConnected == true
+            if ((connected && mesh.hasEstablishedSession(peerID)) || canSendViaNostr(peerID)) {
+                flushOutboxFor(peerID)
+            } else if (connected) {
+                kickHandshake(peerID, immediate = false)
+            }
+        }
+    }
+
+    private fun expireOldEntries(peerID: String, nowMs: Long) {
+        val queued = outbox[peerID] ?: return
+        synchronized(queued) {
+            val iterator = queued.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (nowMs - entry.enqueuedAtMs > OUTBOX_MESSAGE_TTL_MS) {
+                    Log.w(TAG, "Expiring queued PM for ${peerID.take(8)}… msg_id=${entry.messageID.take(8)}…")
+                    iterator.remove()
+                    notifyExpired(entry.messageID)
+                }
+            }
+        }
         if (queued.isEmpty()) {
-            outbox.remove(peerID)
+            outbox.remove(peerID, queued)
+            retryState.remove(peerID)
         }
     }
 
@@ -205,6 +345,7 @@ class MessageRouter private constructor(
     // Called when mesh peer list changes; attempt to flush any matching outbox entries
     fun onPeersUpdated(peers: List<String>) {
         peers.forEach { pid ->
+            kickHandshakeIfPending(pid)
             flushOutboxFor(pid)
             val noiseHex = try {
                 mesh.getPeerInfo(pid)?.noisePublicKey?.joinToString("") { b -> "%02x".format(b) }
@@ -215,10 +356,23 @@ class MessageRouter private constructor(
 
     // Called when a Noise session becomes established; flush both the mesh peerID and its noiseHex alias
     fun onSessionEstablished(peerID: String) {
+        retryState.remove(peerID)
         flushOutboxFor(peerID)
         val noiseHex = try {
             mesh.getPeerInfo(peerID)?.noisePublicKey?.joinToString("") { b -> "%02x".format(b) }
         } catch (_: Exception) { null }
         noiseHex?.let { flushOutboxFor(it) }
+    }
+
+    /**
+     * A peer (re)appeared while we still owe it queued messages and have no working
+     * session: start the handshake now instead of waiting out the backoff.
+     */
+    private fun kickHandshakeIfPending(peerID: String) {
+        val queued = outbox[peerID] ?: return
+        if (queued.isEmpty()) return
+        if (mesh.getPeerInfo(peerID)?.isConnected != true) return
+        if (mesh.hasEstablishedSession(peerID)) return
+        kickHandshake(peerID, immediate = true)
     }
 }

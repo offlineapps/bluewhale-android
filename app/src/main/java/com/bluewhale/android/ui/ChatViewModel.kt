@@ -190,6 +190,16 @@ class ChatViewModel(
     init {
         // Note: Mesh service delegate is now set by MainActivity
         loadAndInitialize()
+        // A queued private message the router gives up on is shown as failed rather than
+        // left looking like it is still on its way.
+        try {
+            com.bluewhale.android.services.MessageRouter.getInstance(getApplication(), meshService).onMessageExpired = { messageID ->
+                messageManager.updateMessageDeliveryStatus(
+                    messageID,
+                    com.bluewhale.android.model.DeliveryStatus.Failed("not delivered within a day")
+                )
+            }
+        } catch (_: Exception) { }
         // Hydrate UI state from process-wide AppStateStore to survive Activity recreation
         viewModelScope.launch {
             try { com.bluewhale.android.services.AppStateStore.peers.collect { peers ->

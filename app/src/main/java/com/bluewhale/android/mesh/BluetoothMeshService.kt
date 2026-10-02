@@ -88,6 +88,14 @@ class BluetoothMeshService(private val context: Context) {
         VerificationService.configure(encryptionService)
         setupDelegates()
         messageHandler.packetProcessor = packetProcessor
+
+        // Flush queued private messages as soon as a session comes up, including in the
+        // background. The UI poll that did this before only runs in the foreground.
+        encryptionService.onSessionEstablished = { peerID ->
+            try {
+                com.bluewhale.android.services.MessageRouter.tryGetInstance()?.onSessionEstablished(peerID)
+            } catch (_: Exception) { }
+        }
         //startPeriodicDebugLogging()
 
         // Initialize sync manager (needs serviceScope)
