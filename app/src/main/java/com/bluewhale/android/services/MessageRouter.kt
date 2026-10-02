@@ -55,6 +55,16 @@ class MessageRouter private constructor(
         }
     }
 
+    /**
+     * Drops every queued message. Used by panic wipe: the outbox outlives the mesh service
+     * and is keyed by the recipient, so without this a message written before the wipe is
+     * sent from the new identity as soon as that contact becomes routable again.
+     */
+    fun clearAll() {
+        outbox.clear()
+        Log.d(TAG, "Cleared all queued outbox messages")
+    }
+
     fun sendPrivate(content: String, toPeerID: String, recipientNickname: String, messageID: String) {
         // First: if this is a geohash DM alias (nostr_<pub16>), route via Nostr using global registry
         if (com.bluewhale.android.nostr.GeohashAliasRegistry.contains(toPeerID)) {
