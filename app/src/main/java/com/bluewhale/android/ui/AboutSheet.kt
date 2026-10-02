@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Security
@@ -502,6 +503,9 @@ fun AboutSheet(
                         val powEnabled by PoWPreferenceManager.powEnabled.collectAsState()
                         val powDifficulty by PoWPreferenceManager.powDifficulty.collectAsState()
                         var backgroundEnabled by remember { mutableStateOf(com.bluewhale.android.service.MeshServicePreferences.isBackgroundEnabled(true)) }
+                        var liveVoiceEnabled by remember {
+                            mutableStateOf(com.bluewhale.android.features.voice.LiveVoicePreferences.isEnabled(context))
+                        }
                         LaunchedEffect(Unit) { BackgroundActivityPreferenceManager.init(context) }
                         val reduceBackgroundActivity by BackgroundActivityPreferenceManager.reduced.collectAsState()
                         LaunchedEffect(Unit) { com.bluewhale.android.mesh.StealthModePreferenceManager.init(context) }
@@ -572,6 +576,23 @@ fun AboutSheet(
                                         subtitle = stringResource(R.string.about_stealth_desc),
                                         checked = stealthEnabled,
                                         onCheckedChange = { enabled -> onStealthModeChange(enabled) }
+                                    )
+
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+
+                                    // Live push-to-talk
+                                    SettingsToggleRow(
+                                        icon = Icons.Filled.Mic,
+                                        title = stringResource(R.string.about_live_voice_title),
+                                        subtitle = stringResource(R.string.about_live_voice_desc),
+                                        checked = liveVoiceEnabled,
+                                        onCheckedChange = { enabled ->
+                                            liveVoiceEnabled = enabled
+                                            com.bluewhale.android.features.voice.LiveVoicePreferences.setEnabled(context, enabled)
+                                        }
                                     )
 
                                     HorizontalDivider(

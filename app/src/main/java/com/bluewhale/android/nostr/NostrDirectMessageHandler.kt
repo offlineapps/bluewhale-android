@@ -190,6 +190,7 @@ class NostrDirectMessageHandler(
                 }
             }
             NoisePayloadType.VERIFY_CHALLENGE,
+            NoisePayloadType.VOICE_FRAME, // live voice is bound to a mesh Noise session
             NoisePayloadType.VERIFY_RESPONSE -> Unit // Ignore verification payloads in Nostr direct messages
             // Only meaningful inside a Noise session, where the static key attributes it
             NoisePayloadType.PEER_STATE -> Unit

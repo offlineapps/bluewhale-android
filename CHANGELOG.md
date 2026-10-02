@@ -31,11 +31,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   to people passing by. Phones with courier mode on carry sealed envelopes they cannot read and
   hand them on until they reach the recipient or expire after three days. See
   `docs/courier_mode.md`.
+- Live push-to-talk, ported from upstream bitchat. Holding the mic streams your voice live to the
+  mesh timeline or to a private chat with an established session, and the voice note still goes
+  out on release. Incoming bursts are marked LIVE and play in the foreground conversation. A
+  settings toggle turns it off. See `docs/push_to_talk.md`.
 
 ### Fixed
 - A timed-out `/ai` question kept running on the model, so the next question waited behind it
   and could time out without the model ever starting on it. Timeouts now cancel the generation,
   and a question asked while the model is busy is refused with a message instead of queueing.
+- GATT writes and notifications were started back to back without waiting for the previous
+  operation on the link to complete, which Android rejects or which can replace the bytes on
+  air. Each link now sends from a queue driven by the completion callbacks.
 
 ## [1.2.0] - 2026-09-22
 

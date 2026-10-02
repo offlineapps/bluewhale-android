@@ -207,6 +207,11 @@ class BluetoothGattServerManager(
                 }
             }
             
+            override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+                // Frees the link's GATT queue for the next notification
+                delegate?.onGattServerNotificationComplete(device.address, status)
+            }
+
             override fun onCharacteristicWriteRequest(
                 device: BluetoothDevice,
                 requestId: Int,

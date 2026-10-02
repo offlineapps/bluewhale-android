@@ -181,6 +181,7 @@ class PacketProcessor(private val myPeerID: String) {
             MessageType.ANNOUNCE -> handleAnnounce(routed)
             MessageType.MESSAGE -> handleMessage(routed)
             MessageType.FILE_TRANSFER -> handleMessage(routed) // treat same routing path; parsing happens in handler
+            MessageType.VOICE_FRAME -> validPacket = delegate?.handleVoiceFrame(routed) ?: false
             MessageType.LEAVE -> handleLeave(routed)
             MessageType.FRAGMENT -> handleFragment(routed)
             MessageType.REQUEST_SYNC -> handleRequestSync(routed)
@@ -351,6 +352,7 @@ interface PacketProcessorDelegate {
     fun handleNoiseEncrypted(routed: RoutedPacket)
     fun handleAnnounce(routed: RoutedPacket)
     fun handleMessage(routed: RoutedPacket)
+    fun handleVoiceFrame(routed: RoutedPacket): Boolean = false
     fun handleLeave(routed: RoutedPacket)
     fun handleFragment(packet: BluewhalePacket): BluewhalePacket?
     fun handleRequestSync(routed: RoutedPacket)

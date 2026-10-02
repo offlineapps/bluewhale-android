@@ -38,6 +38,10 @@ fun AudioMessageItem(
     onCancelTransfer: ((BluewhaleMessage) -> Unit)?,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val liveMessageIDs by com.bluewhale.android.features.voice.LiveVoiceManager
+        .getInstance(context).liveMessageIDs.collectAsState()
+    val isLive = message.id in liveMessageIDs
     val path = message.content.trim()
     // Derive sending progress if applicable
     val (overrideProgress, overrideColor) = when (val st = message.deliveryStatus) {
@@ -78,6 +82,14 @@ fun AudioMessageItem(
         )
 
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (isLive) {
+                Text(
+                    text = "LIVE",
+                    color = Color(0xFFFFB300),
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
             VoiceNotePlayer(
                 path = path,
                 progressOverride = overrideProgress,

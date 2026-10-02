@@ -18,6 +18,7 @@ enum class MessageType(val value: UByte) {
     FRAGMENT(0x20u), // Fragmentation for large packets
     REQUEST_SYNC(0x21u), // GCS-based sync request
     FILE_TRANSFER(0x22u), // New: File transfer packet (BLE voice notes, etc.)
+    VOICE_FRAME(0x29u), // Ephemeral live push-to-talk frame; never added to gossip sync
     COURIER(0x30u); // Sealed store-and-carry envelope or acknowledgement; direct neighbours only (TTL 0)
 
     companion object {

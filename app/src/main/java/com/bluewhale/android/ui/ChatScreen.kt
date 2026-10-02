@@ -60,6 +60,39 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val showVerificationSheet by viewModel.showVerificationSheet.collectAsStateWithLifecycle()
     val showSecurityVerificationSheet by viewModel.showSecurityVerificationSheet.collectAsStateWithLifecycle()
 
+    // Live push-to-talk plays only in the foreground and only for the conversation on screen
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val liveVoiceManager = remember(context) {
+        com.bluewhale.android.features.voice.LiveVoiceManager.getInstance(context)
+    }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_START -> liveVoiceManager.setAppForeground(true)
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> liveVoiceManager.setAppForeground(false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            liveVoiceManager.setAppForeground(false)
+        }
+    }
+    val liveVoiceLocation by viewModel.selectedLocationChannel.collectAsStateWithLifecycle()
+    LaunchedEffect(privateChatSheetPeer, selectedPrivatePeer, currentChannel, liveVoiceLocation) {
+        val sheetPeer = privateChatSheetPeer
+        val dmPeer = selectedPrivatePeer
+        when {
+            sheetPeer != null -> liveVoiceManager.showDirectMessage(sheetPeer)
+            dmPeer != null -> liveVoiceManager.showDirectMessage(dmPeer)
+            currentChannel == null && liveVoiceLocation !is com.bluewhale.android.geohash.ChannelID.Location ->
+                liveVoiceManager.showPublicMesh()
+            else -> liveVoiceManager.clearVisibleConversation()
+        }
+    }
+
     var messageText by remember { mutableStateOf(TextFieldValue("")) }
     var showPasswordPrompt by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
@@ -213,6 +246,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
         onSendFileNote = { peer, onionOrChannel, path ->
             viewModel.sendFileNote(peer, onionOrChannel, path)
         },
+        recorderFactory = viewModel::createVoiceRecorder,
         
         showCommandSuggestions = showCommandSuggestions,
         commandSuggestions = commandSuggestions,
@@ -364,8 +398,13 @@ fun ChatInputSection(
     currentChannel: String?,
     nickname: String,
     colorScheme: ColorScheme,
-    showMediaButtons: Boolean
+    showMediaButtons: Boolean,
+    recorderFactory: ((String?, String?) -> com.bluewhale.android.features.voice.VoiceRecorder)? = null
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val activePublicTalker by remember(context) {
+        com.bluewhale.android.features.voice.LiveVoiceManager.getInstance(context).activePublicTalker
+    }.collectAsState()
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = colorScheme.background
@@ -401,6 +440,8 @@ fun ChatInputSection(
                 currentChannel = currentChannel,
                 nickname = nickname,
                 showMediaButtons = showMediaButtons,
+                recorderFactory = recorderFactory,
+                activePublicTalker = activePublicTalker,
                 modifier = Modifier.fillMaxWidth()
             )
         }

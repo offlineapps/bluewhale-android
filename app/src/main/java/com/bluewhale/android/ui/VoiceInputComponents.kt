@@ -33,7 +33,9 @@ import kotlinx.coroutines.launch
 fun VoiceRecordButton(
     modifier: Modifier = Modifier,
     backgroundColor: Color,
-    onStart: () -> Unit,
+    /** Builds the recorder for this press; one with a live target streams push-to-talk. */
+    recorderFactory: (() -> VoiceRecorder)? = null,
+    onStart: (isLive: Boolean) -> Unit,
     onAmplitude: (amplitude: Int, elapsedMs: Long) -> Unit,
     onFinish: (filePath: String) -> Unit
 ) {
@@ -53,6 +55,7 @@ fun VoiceRecordButton(
     val latestOnStart = rememberUpdatedState(onStart)
     val latestOnAmplitude = rememberUpdatedState(onAmplitude)
     val latestOnFinish = rememberUpdatedState(onFinish)
+    val latestRecorderFactory = rememberUpdatedState(recorderFactory)
 
     Box(
         modifier = modifier
@@ -66,14 +69,14 @@ fun VoiceRecordButton(
                                 micPermission.launchPermissionRequest()
                                 return@detectTapGestures
                             }
-                            val rec = VoiceRecorder(context)
+                            val rec = latestRecorderFactory.value?.invoke() ?: VoiceRecorder(context)
                             val f = rec.start()
                             recorder = rec
                             isRecording = f != null
                             recordedFilePath = f?.absolutePath
                             recordingStart = System.currentTimeMillis()
                             if (isRecording) {
-                                latestOnStart.value()
+                                latestOnStart.value(rec.isLive)
                                 // Haptic "knock" when recording starts
                                 try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Exception) {}
                                 // Start amplitude polling loop
@@ -112,7 +115,8 @@ fun VoiceRecordButton(
                                 val file = recorder?.stop()
                                 isRecording = false
                                 recorder = null
-                                val path = (file?.absolutePath ?: recordedFilePath)
+                                // A live burst too short to keep is deleted on stop; never send a missing file
+                                val path = file?.absolutePath ?: recordedFilePath?.takeIf { java.io.File(it).isFile }
                                 recordedFilePath = null
                                 if (!path.isNullOrBlank()) {
                                     // Haptic "knock" when recording stops
