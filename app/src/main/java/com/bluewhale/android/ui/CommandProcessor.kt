@@ -46,6 +46,7 @@ class CommandProcessor(
         CommandSuggestion("/channels", emptyList(), null, "show all discovered channels"),
         CommandSuggestion("/clear", emptyList(), null, "clear chat messages"),
         CommandSuggestion("/courier", listOf("/courier!"), "<message>", "send by courier to someone out of reach"),
+        CommandSuggestion("/find", emptyList(), "<nickname>", "find someone nearby in a crowd"),
         CommandSuggestion("/hug", emptyList(), "<nickname>", "send someone a warm hug"),
         CommandSuggestion("/j", listOf("/join"), "<channel>", "join or create a channel"),
         CommandSuggestion("/m", listOf("/msg"), "<nickname> [message]", "send private message"),
@@ -66,6 +67,7 @@ class CommandProcessor(
             "/ai" -> handleAiCommand(parts, meshService, myPeerID, onSendMessage)
             "/tr", "/translate" -> handleTranslateCommand(parts, myPeerID)
             "/courier", "/courier!" -> handleCourierCommand(parts, meshService, myPeerID, urgent = cmd == "/courier!")
+            "/find" -> handleFindCommand(parts, meshService)
             "/j", "/join" -> handleJoinCommand(parts, myPeerID)
             "/m", "/msg" -> handleMessageCommand(parts, meshService)
             "/w" -> handleWhoCommand(meshService, viewModel)
@@ -827,6 +829,17 @@ class CommandProcessor(
     
     // MARK: - Utility Functions
     
+    /** Opens the warmer/colder finder for a nickname, or for the open private chat. */
+    private fun handleFindCommand(parts: List<String>, meshService: BluetoothMeshService) {
+        val name = parts.getOrNull(1)?.removePrefix("@")
+        val peerID = if (name != null) getPeerIDForNickname(name, meshService) else state.getSelectedPrivateChatPeerValue()
+        if (peerID == null) {
+            postSystemMessage(if (name != null) "find: nobody called $name is on the mesh." else "usage: /find <nickname>")
+            return
+        }
+        com.bluewhale.android.find.FindMode.start(peerID)
+    }
+
     private fun getPeerIDForNickname(nickname: String, meshService: BluetoothMeshService): String? {
         return meshService.getPeerNicknames().entries.find { it.value == nickname }?.key
     }

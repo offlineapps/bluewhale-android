@@ -576,6 +576,12 @@ private fun ChatDialogs(
         )
     }
     
+    // Find a friend nearby
+    val findTarget by viewModel.findTarget.collectAsStateWithLifecycle()
+    findTarget?.let { peer ->
+        FindFriendSheet(peerID = peer, viewModel = viewModel, onDismiss = { viewModel.closeFindFriend() })
+    }
+
     // User action sheet
     if (showUserSheet) {
         ChatUserSheet(

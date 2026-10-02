@@ -212,6 +212,8 @@
   <string name="about_courier_desc">Carry sealed messages for people out of range and hand them on. You cannot read them</string>
   <string name="about_live_voice_title">Live push-to-talk</string>
   <string name="about_live_voice_desc">Hold the mic to talk live to people in range; the voice note is still sent on release</string>
+  <string name="action_find_title">find %1$s nearby</string>
+  <string name="action_find_subtitle">warmer or colder from the bluetooth signal, ring their phone, or swap gps</string>
   <string name="action_copy_message_subtitle">copy this message to clipboard</string>
   <string name="action_translate_message_title">translate message</string>
   <string name="action_translate_message_subtitle">translate on this device with the offline ai model</string>

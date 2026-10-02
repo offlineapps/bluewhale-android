@@ -25,7 +25,9 @@ enum class NoisePayloadType(val value: UByte) {
     VERIFY_CHALLENGE(0x10u),    // Verification challenge
     VERIFY_RESPONSE(0x11u),     // Verification response
     FILE_TRANSFER(0x20u),
-    PEER_STATE(0x21u);          // Capabilities and Ed25519 binding, proven by the session it arrives in
+    PEER_STATE(0x21u),          // Capabilities and Ed25519 binding, proven by the session it arrives in
+    FIND_RING(0x40u),           // Bluewhale: "ring my phone", to find each other in a crowd
+    LOCATION_SHARE(0x41u);      // Bluewhale: one-shot GPS position shared with this peer only
 
 
     companion object {

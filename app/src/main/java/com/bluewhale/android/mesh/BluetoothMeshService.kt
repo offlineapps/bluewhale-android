@@ -510,6 +510,14 @@ class BluetoothMeshService(private val context: Context) {
             override fun onVerifyResponseReceived(peerID: String, payload: ByteArray, timestampMs: Long) {
                 delegate?.didReceiveVerifyResponse(peerID, payload, timestampMs)
             }
+
+            override fun onFindRingReceived(peerID: String) {
+                delegate?.didReceiveFindRing(peerID)
+            }
+
+            override fun onPositionShared(peerID: String, position: com.bluewhale.android.find.SharedPosition) {
+                delegate?.didReceivePositionShare(peerID, position)
+            }
         }
         
         // PacketProcessor delegates
@@ -1137,6 +1145,22 @@ class BluetoothMeshService(private val context: Context) {
         }
     }
     
+    // MARK: - Finding each other
+
+    /** Asks [peerID]'s phone to ring; it only rings if we are their favourite. Needs a session. */
+    fun sendFindRing(peerID: String): Boolean {
+        if (!encryptionService.hasEstablishedSession(peerID)) return false
+        sendNoisePayloadToPeer(NoisePayload(NoisePayloadType.FIND_RING, ByteArray(0)), peerID, "find ring")
+        return true
+    }
+
+    /** Shares one GPS position with [peerID] only, inside our Noise session. */
+    fun sendPositionShare(peerID: String, position: com.bluewhale.android.find.SharedPosition): Boolean {
+        if (!encryptionService.hasEstablishedSession(peerID)) return false
+        sendNoisePayloadToPeer(NoisePayload(NoisePayloadType.LOCATION_SHARE, position.encode()), peerID, "position share")
+        return true
+    }
+
     /**
      * Send broadcast announce with TLV-encoded identity announcement - exactly like iOS
      */
@@ -1727,5 +1751,9 @@ interface BluetoothMeshDelegate {
     fun decryptChannelMessage(encryptedContent: ByteArray, channel: String): String?
     fun getNickname(): String?
     fun isFavorite(peerID: String): Boolean
+    /** [peerID] asked our phone to ring so they can find us. */
+    fun didReceiveFindRing(peerID: String) {}
+    /** [peerID] shared their GPS position with us. */
+    fun didReceivePositionShare(peerID: String, position: com.bluewhale.android.find.SharedPosition) {}
     // registerPeerPublicKey REMOVED - fingerprints now handled centrally in PeerManager
 }

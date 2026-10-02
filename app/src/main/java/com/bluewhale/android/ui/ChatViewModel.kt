@@ -996,6 +996,83 @@ class ChatViewModel(
     override fun isFavorite(peerID: String): Boolean {
         return meshDelegateHandler.isFavorite(peerID)
     }
+
+    // MARK: - Finding a friend nearby
+
+    /** The peer the find sheet is showing, if open. */
+    val findTarget: StateFlow<String?> = com.bluewhale.android.find.FindMode.target
+
+    fun openFindFriend(peerID: String) = com.bluewhale.android.find.FindMode.start(peerID)
+
+    fun closeFindFriend() = com.bluewhale.android.find.FindMode.stop()
+
+    private val lastFindRingFrom = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun findNotice(peerID: String, text: String) {
+        messageManager.addPrivateMessage(
+            peerID,
+            BluewhaleMessage(sender = "system", content = text, timestamp = Date(), isRelay = false)
+        )
+    }
+
+    /** Rings [peerID]'s phone; false without a live session. */
+    fun ringPeer(peerID: String): Boolean {
+        val sent = meshService.sendFindRing(peerID)
+        findNotice(
+            peerID,
+            if (sent) "asked their phone to ring. it rings if you are one of their favourites."
+            else "cannot ring them: no secure session yet. open a private chat with them first."
+        )
+        return sent
+    }
+
+    /** Sends one GPS fix to [peerID] only, encrypted in our session. */
+    fun sharePositionWith(peerID: String) {
+        com.bluewhale.android.geohash.LocationChannelManager.getInstance(getApplication()).currentLocation { location ->
+            viewModelScope.launch {
+                if (location == null) {
+                    findNotice(peerID, "no gps fix to share. allow location access and try outside or near a window.")
+                    return@launch
+                }
+                val position = com.bluewhale.android.find.SharedPosition(
+                    location.latitude, location.longitude, location.accuracy, location.time
+                )
+                val sent = meshService.sendPositionShare(peerID, position)
+                findNotice(
+                    peerID,
+                    if (sent) "shared your gps position with them once. nobody else can read it."
+                    else "cannot share: no secure session yet. open a private chat with them first."
+                )
+            }
+        }
+    }
+
+    override fun didReceiveFindRing(peerID: String) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            // One ring per sender per 10 s: holding the button should not make a phone scream
+            if (now - (lastFindRingFrom[peerID] ?: 0L) < 10_000L) return@launch
+            lastFindRingFrom[peerID] = now
+            val nickname = meshService.getPeerNicknames()[peerID] ?: peerID.take(8)
+            val rang = isFavorite(peerID)
+            if (rang) com.bluewhale.android.find.FindRinger.ring(getApplication())
+            findNotice(peerID, com.bluewhale.android.find.FindNotices.ringReceived(nickname, rang))
+        }
+    }
+
+    override fun didReceivePositionShare(peerID: String, position: com.bluewhale.android.find.SharedPosition) {
+        val nickname = meshService.getPeerNicknames()[peerID] ?: peerID.take(8)
+        com.bluewhale.android.geohash.LocationChannelManager.getInstance(getApplication()).currentLocation { mine ->
+            viewModelScope.launch {
+                findNotice(
+                    peerID,
+                    com.bluewhale.android.find.FindNotices.positionShared(
+                        nickname, position, mine?.latitude, mine?.longitude, mine?.time, System.currentTimeMillis()
+                    )
+                )
+            }
+        }
+    }
     
     // registerPeerPublicKey REMOVED - fingerprints now handled centrally in PeerManager
     
@@ -1015,6 +1092,7 @@ class ChatViewModel(
         
         // Drop live voice in progress and its partial files
         try { com.bluewhale.android.features.voice.LiveVoiceManager.getInstance(getApplication()).reset() } catch (_: Exception) { }
+        com.bluewhale.android.find.FindMode.stop()
 
         // Clear seen message store
         try {
