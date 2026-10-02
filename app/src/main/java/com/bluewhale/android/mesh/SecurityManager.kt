@@ -23,12 +23,16 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
         private const val CLEANUP_INTERVAL = com.bluewhale.android.util.AppConstants.Security.CLEANUP_INTERVAL_MS // 5 minutes
         private const val MAX_PROCESSED_MESSAGES = com.bluewhale.android.util.AppConstants.Security.MAX_PROCESSED_MESSAGES
         private const val MAX_PROCESSED_KEY_EXCHANGES = com.bluewhale.android.util.AppConstants.Security.MAX_PROCESSED_KEY_EXCHANGES
+        // Long enough to absorb relayed duplicates, short enough that a retry carrying the
+        // same handshake message after a failed attempt is not blocked indefinitely.
+        private const val KEY_EXCHANGE_DEDUP_TIMEOUT = 60_000L
     }
     
     // Security tracking
     private val processedMessages = Collections.synchronizedSet(mutableSetOf<String>())
     private val processedKeyExchanges = Collections.synchronizedSet(mutableSetOf<String>())
     private val messageTimestamps = Collections.synchronizedMap(mutableMapOf<String, Long>())
+    private val keyExchangeTimestamps = Collections.synchronizedMap(mutableMapOf<String, Long>())
     
     // Delegate for callbacks
     var delegate: SecurityManagerDelegate? = null
@@ -123,6 +127,7 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
         }
         Log.d(TAG, "Processing Noise handshake from $peerID (${packet.payload.size} bytes)")
         processedKeyExchanges.add(exchangeKey)
+        keyExchangeTimestamps[exchangeKey] = System.currentTimeMillis()
         
         try {
             // Process the Noise handshake through the updated EncryptionService
@@ -345,8 +350,8 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
     /**
      * Clean up old processed messages and timestamps
      */
-    private fun cleanupOldData() {
-        val cutoffTime = System.currentTimeMillis() - MESSAGE_TIMEOUT
+    internal fun cleanupOldData(nowMs: Long = System.currentTimeMillis()) {
+        val cutoffTime = nowMs - MESSAGE_TIMEOUT
         var removedCount = 0
         
         // Clean up old message timestamps and corresponding processed messages
@@ -370,11 +375,22 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
             removedCount += excess
         }
         
+        // Expire handshake dedup entries by age. Size alone let them live indefinitely, so
+        // the same handshake message arriving again after a failed attempt was ignored.
+        val keyExchangeCutoff = nowMs - KEY_EXCHANGE_DEDUP_TIMEOUT
+        keyExchangeTimestamps.entries.filter { (_, timestamp) -> timestamp < keyExchangeCutoff }
+            .map { it.key }
+            .forEach { exchangeKey ->
+                keyExchangeTimestamps.remove(exchangeKey)
+                processedKeyExchanges.remove(exchangeKey)
+            }
+
         // Limit the size of processed key exchanges set
         if (processedKeyExchanges.size > MAX_PROCESSED_KEY_EXCHANGES) {
             val excess = processedKeyExchanges.size - MAX_PROCESSED_KEY_EXCHANGES
             val toRemove = processedKeyExchanges.take(excess)
             processedKeyExchanges.removeAll(toRemove.toSet())
+            toRemove.forEach { keyExchangeTimestamps.remove(it) }
         }
         
         if (removedCount > 0) {
@@ -398,6 +414,7 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
         processedMessages.clear()
         processedKeyExchanges.clear()
         messageTimestamps.clear()
+        keyExchangeTimestamps.clear()
     }
     
     /**

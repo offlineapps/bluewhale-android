@@ -8,7 +8,9 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class NoiseSessionManager(
     private val localStaticPrivateKey: ByteArray,
-    private val localStaticPublicKey: ByteArray
+    private val localStaticPublicKey: ByteArray,
+    // Injectable so tests can age a handshake without waiting.
+    private val clock: () -> Long = System::currentTimeMillis
 ) {
     
     companion object {
@@ -17,6 +19,12 @@ class NoiseSessionManager(
         // A handshake is unauthenticated until it completes, and its peer ID is only a
         // claim, so the number of half open sessions is bounded.
         private const val MAX_HANDSHAKING_SESSIONS = 32
+
+        // A handshake that has not completed within this long has lost a message.
+        private const val HANDSHAKE_TIMEOUT_MS = 10_000L
+
+        // XX message 1 is the initiator's bare ephemeral key.
+        private const val HANDSHAKE_MESSAGE_1_SIZE = 32
     }
     
     private val sessions = ConcurrentHashMap<String, NoiseSession>()
@@ -106,6 +114,20 @@ class NoiseSessionManager(
         try {
             var session = store[peerID]
 
+            // A first handshake message means the peer has started over, so a half open
+            // attempt in our store is dead: its reply or final message was lost. Feeding the
+            // new message into it would throw and cost the peer a whole extra round. Our own
+            // initiator attempt yields only once it is stale, so two peers starting at the
+            // same moment still resolve as before.
+            if (session != null && session.isHandshaking() && message.size == HANDSHAKE_MESSAGE_1_SIZE &&
+                (!session.isInitiatorSession() || isStale(session))
+            ) {
+                Log.d(TAG, "Restarting half open handshake with $peerID on a fresh first message")
+                store.remove(peerID, session)
+                session.destroy()
+                session = null
+            }
+
             // If no session exists, create one as responder
             if (session == null) {
                 if (!hasRoomForNewHandshake()) {
@@ -162,6 +184,9 @@ class NoiseSessionManager(
         }
     }
     
+    private fun isStale(session: NoiseSession): Boolean =
+        clock() - session.getCreationTime() > HANDSHAKE_TIMEOUT_MS
+
     /**
      * Drops the oldest handshake that never completed, to make room for a new one.
      */

@@ -193,6 +193,7 @@ class NoiseSession(
     fun isEstablished(): Boolean = state is NoiseSessionState.Established
     fun isHandshaking(): Boolean = state is NoiseSessionState.Handshaking
     fun getCreationTime(): Long = creationTime
+    fun isInitiatorSession(): Boolean = isInitiator
     
     init {
         try {
