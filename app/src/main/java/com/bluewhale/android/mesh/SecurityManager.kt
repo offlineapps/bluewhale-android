@@ -71,16 +71,19 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
             Log.d(TAG, "Allowing duplicate ANNOUNCE from direct neighbor: $messageID")
         }
 
-        // Add to processed messages
-        processedMessages.add(messageID)
-        messageTimestamps[messageID] = currentTime
-        
         // Enforce mandatory signature verification
         if (!verifyPacketSignature(packet, peerID)) {
             Log.w(TAG, "Dropping packet from $peerID due to signature verification failure")
             return false
         }
-        
+
+        // Only an authentic packet is remembered. The ID covers neither the signature nor
+        // the full payload, so recording a copy that failed verification would let one
+        // forged or corrupted copy suppress the genuine packet when it arrives, and a
+        // packet seen before its sender's announce would stay dropped after it.
+        processedMessages.add(messageID)
+        messageTimestamps[messageID] = currentTime
+
         Log.d(TAG, "Packet validation passed for $peerID, messageID: $messageID")
         return true
     }
