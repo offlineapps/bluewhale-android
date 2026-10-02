@@ -23,12 +23,32 @@ class MediaSendingManager(
         get() = getMeshService()
     companion object {
         private const val TAG = "MediaSendingManager"
-        private const val MAX_FILE_SIZE = com.bluewhale.android.util.AppConstants.Media.MAX_FILE_SIZE_BYTES // 50MB limit
+        private const val MAX_FILE_SIZE = com.bluewhale.android.util.AppConstants.Media.MAX_FILE_SIZE_BYTES
     }
 
     // Track in-flight transfer progress: transferId -> messageId and reverse
     private val transferMessageMap = mutableMapOf<String, String>()
     private val messageTransferMap = mutableMapOf<String, String>()
+
+    /**
+     * Receivers drop anything larger than they can reassemble, so an oversized file is
+     * refused here and the user told, rather than streamed for minutes and never arriving.
+     */
+    private fun rejectIfTooLarge(file: java.io.File, toPeerIDOrNull: String?): Boolean {
+        if (file.length() <= MAX_FILE_SIZE) return false
+        Log.e(TAG, "❌ File too large: ${file.length()} bytes (max: $MAX_FILE_SIZE)")
+        val text = "file too large to send over the mesh: ${file.length() / 1024} KB (max ${MAX_FILE_SIZE / 1024} KB)"
+        // Shown where the user is sending from; a private chat does not show the public timeline.
+        if (toPeerIDOrNull != null) {
+            messageManager.addPrivateMessage(
+                toPeerIDOrNull,
+                BluewhaleMessage(sender = "system", content = text, timestamp = Date(), isRelay = false)
+            )
+        } else {
+            messageManager.addSystemMessage(text)
+        }
+        return true
+    }
 
     /**
      * Send a voice note (audio file)
@@ -42,10 +62,7 @@ class MediaSendingManager(
             }
             Log.d(TAG, "📁 File exists: size=${file.length()} bytes, name=${file.name}")
             
-            if (file.length() > MAX_FILE_SIZE) {
-                Log.e(TAG, "❌ File too large: ${file.length()} bytes (max: $MAX_FILE_SIZE)")
-                return
-            }
+            if (rejectIfTooLarge(file, toPeerIDOrNull)) return
 
             val filePacket = BluewhaleFilePacket(
                 fileName = file.name,
@@ -77,10 +94,7 @@ class MediaSendingManager(
             }
             Log.d(TAG, "📁 File exists: size=${file.length()} bytes, name=${file.name}")
             
-            if (file.length() > MAX_FILE_SIZE) {
-                Log.e(TAG, "❌ File too large: ${file.length()} bytes (max: $MAX_FILE_SIZE)")
-                return
-            }
+            if (rejectIfTooLarge(file, toPeerIDOrNull)) return
 
             val filePacket = BluewhaleFilePacket(
                 fileName = file.name,
@@ -115,10 +129,7 @@ class MediaSendingManager(
             }
             Log.d(TAG, "📁 File exists: size=${file.length()} bytes, name=${file.name}")
             
-            if (file.length() > MAX_FILE_SIZE) {
-                Log.e(TAG, "❌ File too large: ${file.length()} bytes (max: $MAX_FILE_SIZE)")
-                return
-            }
+            if (rejectIfTooLarge(file, toPeerIDOrNull)) return
 
             // Use the real MIME type based on extension; fallback to octet-stream
             val mimeType = try { 

@@ -157,6 +157,12 @@ class BluetoothPacketBroadcaster(
                 }
                 return
             }
+            // Empty means the packet could not be fragmented (encode failure or over the
+            // reassembly limits). Sending it whole would only be truncated by the link.
+            if (fragments.isEmpty()) {
+                Log.e(TAG, "❌ Dropping packet type ${packet.type} (${packet.payload.size} bytes): could not be fragmented")
+                return
+            }
             if (fragments.size > 1) {
                 if (isFile) {
                     Log.d(TAG, "🔀 File needs ${fragments.size} fragments")

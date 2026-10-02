@@ -16,7 +16,10 @@ import java.util.concurrent.ConcurrentHashMap
  * - Same reassembly logic and timeout handling
  * - Uses new FragmentPayload model for type safety
  */
-class FragmentManager {
+class FragmentManager(
+    // Injectable so tests can drive reassembly timeouts without waiting on the wall clock.
+    private val clock: () -> Long = System::currentTimeMillis
+) {
     
     companion object {
         private const val TAG = "FragmentManager"
@@ -33,6 +36,9 @@ class FragmentManager {
         val type: UByte,
         val createdAt: Long,
         val fragments: Array<ByteArray?>,
+        // A set expires after FRAGMENT_TIMEOUT of silence, not of age: a file near the size
+        // cap takes longer than the timeout to stream, and still has fragments arriving.
+        var lastActivityAt: Long = createdAt,
         var receivedCount: Int = 0,
         var totalBytes: Int = 0
     ) {
@@ -109,6 +115,15 @@ class FragmentManager {
         }
 
         Log.d(TAG, "📏 Dynamic fragment size: $maxDataSize (MAX: $MAX_FRAGMENT_SIZE, Overhead: $packetOverhead)")
+
+        // Receivers discard a set over either limit, so sending it only burns airtime.
+        // This also keeps index and total inside the 16-bit fields of the fragment header.
+        val limits = com.bluewhale.android.util.AppConstants.Fragmentation
+        val fragmentCount = (fullData.size + maxDataSize - 1) / maxDataSize
+        if (fullData.size > limits.MAX_SET_BYTES || fragmentCount > limits.MAX_FRAGMENTS_PER_ID) {
+            Log.e(TAG, "❌ Packet of ${fullData.size} bytes ($fragmentCount fragments) exceeds what receivers reassemble")
+            return emptyList()
+        }
 
         val fragmentChunks = stride(0, fullData.size, maxDataSize) { offset ->
             val endOffset = minOf(offset + maxDataSize, fullData.size)
@@ -187,7 +202,7 @@ class FragmentManager {
             val lock = lockFor(fragmentIDString)
 
             synchronized(lock) {
-                val now = System.currentTimeMillis()
+                val now = clock()
 
                 var set = synchronized(globalLock) { sets[fragmentIDString] }
 
@@ -252,6 +267,7 @@ class FragmentManager {
 
                 set.receivedCount++
                 set.fragments[fragmentPayload.index] = fragmentPayload.data
+                set.lastActivityAt = now
                 set.totalBytes = newTotalSizeOfSet
 
                 if (set.isComplete()) {
@@ -371,12 +387,12 @@ class FragmentManager {
      * iOS cleanup - exactly matching performCleanup() implementation
      * Clean old fragments (> 30 seconds old)
      */
-    private fun cleanupOldFragments() {
-        val now = System.currentTimeMillis()
+    internal fun cleanupOldFragments() {
+        val now = clock()
         val cutoff = now - FRAGMENT_TIMEOUT
         
         val oldFragments = synchronized(globalLock) {
-            sets.filter { it.value.createdAt < cutoff }.map { it.key }
+            sets.filter { it.value.lastActivityAt < cutoff }.map { it.key }
         }
         
         for (fragmentID in oldFragments) {
@@ -401,7 +417,7 @@ class FragmentManager {
                 appendLine("Max Fragment Size: $MAX_FRAGMENT_SIZE bytes")
                 
                 sets.forEach { (fragmentID, set) ->
-                    val ageSeconds = (System.currentTimeMillis() - set.createdAt) / 1000
+                    val ageSeconds = (clock() - set.createdAt) / 1000
                     appendLine("  - $fragmentID: ${set.receivedCount}/${set.total} fragments, type: ${set.type}, age: ${ageSeconds}s, bytes: ${set.totalBytes}")
                 }
             }
