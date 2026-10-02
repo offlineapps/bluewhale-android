@@ -34,12 +34,19 @@ class MediaSendingManager(
      * Receivers drop anything larger than they can reassemble, so an oversized file is
      * refused here and the user told, rather than streamed for minutes and never arriving.
      */
-    private fun rejectIfTooLarge(file: java.io.File): Boolean {
+    private fun rejectIfTooLarge(file: java.io.File, toPeerIDOrNull: String?): Boolean {
         if (file.length() <= MAX_FILE_SIZE) return false
         Log.e(TAG, "❌ File too large: ${file.length()} bytes (max: $MAX_FILE_SIZE)")
-        messageManager.addSystemMessage(
-            "file too large to send over the mesh: ${file.length() / 1024} KB (max ${MAX_FILE_SIZE / 1024} KB)"
-        )
+        val text = "file too large to send over the mesh: ${file.length() / 1024} KB (max ${MAX_FILE_SIZE / 1024} KB)"
+        // Shown where the user is sending from; a private chat does not show the public timeline.
+        if (toPeerIDOrNull != null) {
+            messageManager.addPrivateMessage(
+                toPeerIDOrNull,
+                BluewhaleMessage(sender = "system", content = text, timestamp = Date(), isRelay = false)
+            )
+        } else {
+            messageManager.addSystemMessage(text)
+        }
         return true
     }
 
@@ -55,7 +62,7 @@ class MediaSendingManager(
             }
             Log.d(TAG, "📁 File exists: size=${file.length()} bytes, name=${file.name}")
             
-            if (rejectIfTooLarge(file)) return
+            if (rejectIfTooLarge(file, toPeerIDOrNull)) return
 
             val filePacket = BluewhaleFilePacket(
                 fileName = file.name,
@@ -87,7 +94,7 @@ class MediaSendingManager(
             }
             Log.d(TAG, "📁 File exists: size=${file.length()} bytes, name=${file.name}")
             
-            if (rejectIfTooLarge(file)) return
+            if (rejectIfTooLarge(file, toPeerIDOrNull)) return
 
             val filePacket = BluewhaleFilePacket(
                 fileName = file.name,
@@ -122,7 +129,7 @@ class MediaSendingManager(
             }
             Log.d(TAG, "📁 File exists: size=${file.length()} bytes, name=${file.name}")
             
-            if (rejectIfTooLarge(file)) return
+            if (rejectIfTooLarge(file, toPeerIDOrNull)) return
 
             // Use the real MIME type based on extension; fallback to octet-stream
             val mimeType = try { 
