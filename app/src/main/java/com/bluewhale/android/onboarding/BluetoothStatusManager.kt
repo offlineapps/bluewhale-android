@@ -229,7 +229,12 @@ class BluetoothStatusManager(
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                when (intent?.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                val state = intent?.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                if (state == BluetoothAdapter.STATE_TURNING_OFF || state == BluetoothAdapter.STATE_OFF) {
+                    // Links dropping because our own radio is going off must not read as jamming
+                    com.bluewhale.android.mesh.JammingDetector.Shared.detector.reset()
+                }
+                when (state) {
                     BluetoothAdapter.STATE_ON -> {
                         Log.d(TAG, "Bluetooth turned ON")
                         onBluetoothStateChanged(BluetoothStatus.ENABLED)

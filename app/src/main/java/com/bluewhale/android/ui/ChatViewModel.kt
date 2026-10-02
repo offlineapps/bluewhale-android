@@ -211,6 +211,16 @@ class ChatViewModel(
                 )
             }
         } catch (_: Exception) { }
+        // Tell the user when the radio looks jammed, and when it clears
+        viewModelScope.launch {
+            var previous = com.bluewhale.android.mesh.JammingDetector.Level.CLEAR
+            com.bluewhale.android.mesh.JammingDetector.Shared.detector.state.collect { assessment ->
+                com.bluewhale.android.mesh.JammingDetector.Notices.forTransition(previous, assessment)?.let {
+                    messageManager.addSystemMessage(it)
+                }
+                previous = assessment.level
+            }
+        }
         // Hydrate UI state from process-wide AppStateStore to survive Activity recreation
         viewModelScope.launch {
             try { com.bluewhale.android.services.AppStateStore.peers.collect { peers ->
