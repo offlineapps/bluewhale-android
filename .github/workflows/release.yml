@@ -18,7 +18,13 @@ permissions:
 # (SHA256SUMS.asc) is created manually so the signing key never lives in CI.
 
 jobs:
+  # Unit tests, lint, debug and release builds, and the release APK launched on emulators:
+  # nothing is signed or published unless all of it passes
+  checks:
+    uses: ./.github/workflows/android-build.yml
+
   build:
+    needs: checks
     runs-on: ubuntu-latest
 
     steps:

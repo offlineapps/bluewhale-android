@@ -2,6 +2,8 @@ name: Android CI
 
 on:
   workflow_dispatch:
+  # The release workflow runs these same checks before it builds and publishes anything
+  workflow_call:
   push:
     branches: [ "main", "develop" ]
   pull_request:
@@ -102,3 +104,61 @@ jobs:
       with:
         name: ${{ matrix.variant }}-apk
         path: app/build/outputs/apk/**/*.apk
+
+  smoke:
+    name: Launch release on API ${{ matrix.api }}
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest Android the app supports, and a current one
+        api: [26, 34]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download release APK
+      uses: actions/download-artifact@v4
+      with:
+        name: Release-apk
+        path: apk
+
+    # The release APK is minified by R8, which is what this job exists to check. CI has no
+    # release key, so it is signed with a throwaway key just to be installable.
+    - name: Sign release APK with a throwaway key
+      id: apk
+      run: |
+        UNSIGNED=$(find apk -name '*x86_64*release*.apk' | head -1)
+        test -n "$UNSIGNED" || { echo "no x86_64 release APK in:"; find apk; exit 1; }
+        keytool -genkeypair -keystore ci.keystore -storepass android -keypass android -alias ci \
+          -keyalg RSA -keysize 2048 -validity 1 -dname "CN=Bluewhale CI" -noprompt
+        APKSIGNER=$(find "$ANDROID_HOME"/build-tools -name apksigner | sort -V | tail -1)
+        "$APKSIGNER" sign --ks ci.keystore --ks-pass pass:android --ks-key-alias ci --out smoke.apk "$UNSIGNED"
+        echo "path=$PWD/smoke.apk" >> "$GITHUB_OUTPUT"
+
+    - name: Enable KVM
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - name: Launch on emulator
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ matrix.api }}
+        target: google_apis
+        arch: x86_64
+        disable-animations: true
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+        script: bash .github/scripts/smoke-test.sh ${{ steps.apk.outputs.path }} 45
+
+    - name: Upload logcat
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: smoke-logcat-api${{ matrix.api }}
+        path: smoke-logs/
+        if-no-files-found: ignore
