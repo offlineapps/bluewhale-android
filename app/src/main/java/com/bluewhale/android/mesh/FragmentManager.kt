@@ -116,6 +116,15 @@ class FragmentManager {
 
         Log.d(TAG, "📏 Dynamic fragment size: $maxDataSize (MAX: $MAX_FRAGMENT_SIZE, Overhead: $packetOverhead)")
 
+        // Receivers discard a set over either limit, so sending it only burns airtime.
+        // This also keeps index and total inside the 16-bit fields of the fragment header.
+        val limits = com.bluewhale.android.util.AppConstants.Fragmentation
+        val fragmentCount = (fullData.size + maxDataSize - 1) / maxDataSize
+        if (fullData.size > limits.MAX_SET_BYTES || fragmentCount > limits.MAX_FRAGMENTS_PER_ID) {
+            Log.e(TAG, "❌ Packet of ${fullData.size} bytes ($fragmentCount fragments) exceeds what receivers reassemble")
+            return emptyList()
+        }
+
         val fragmentChunks = stride(0, fullData.size, maxDataSize) { offset ->
             val endOffset = minOf(offset + maxDataSize, fullData.size)
             fullData.sliceArray(offset..<endOffset)

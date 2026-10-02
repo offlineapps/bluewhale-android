@@ -51,7 +51,10 @@ object AppConstants {
         const val CLEANUP_INTERVAL_MS: Long = 10_000L
         
         // Hardening limits
-        const val MAX_FRAGMENTS_PER_ID = 256
+        // Must admit a MAX_SET_BYTES message cut into the smallest fragments a sender
+        // produces (a source route shrinks them below 300 bytes), or senders and receivers
+        // disagree about what fits. 4096 slots cost 16 KiB per set at most.
+        const val MAX_FRAGMENTS_PER_ID = 4096
         const val MAX_ACTIVE_SETS = 64
         const val MAX_SET_BYTES = 1_048_576 // 1MB
         const val MAX_GLOBAL_BYTES = 4L * 1_048_576L // 4MB
@@ -163,7 +166,9 @@ object AppConstants {
     }
 
     object Media {
-        const val MAX_FILE_SIZE_BYTES: Long = 50L * 1024 * 1024
+        // Receivers drop any fragmented packet larger than Fragmentation.MAX_SET_BYTES, so a
+        // file is capped below that, leaving room for the file TLV, Noise and packet overhead.
+        const val MAX_FILE_SIZE_BYTES: Long = Fragmentation.MAX_SET_BYTES - 64L * 1024
     }
 
     object Services {
