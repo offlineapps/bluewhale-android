@@ -22,6 +22,7 @@ class BluetoothConnectionManager(
     
     companion object {
         private const val TAG = "BluetoothConnectionManager"
+        private const val JAMMING_TICK_MS = 5_000L
     }
     
     // Core Bluetooth components
@@ -103,6 +104,28 @@ class BluetoothConnectionManager(
                 } else if (serverRoleEnabled()) {
                     serverManager.start()
                 }
+            }
+        }
+        // Jamming: silence is the absence of events, so the detector needs a clock tick; a
+        // likely jam switches the radio to full power until it clears
+        val jamming = JammingDetector.Shared.detector
+        connectionScope.launch {
+            while (true) {
+                delay(JAMMING_TICK_MS)
+                if (!this@BluetoothConnectionManager.isActive) continue
+                if (bluetoothAdapter?.isEnabled != true) {
+                    // Our own radio is off: that is not jamming
+                    jamming.reset()
+                } else {
+                    jamming.tick()
+                }
+            }
+        }
+        connectionScope.launch {
+            jamming.state.collect { assessment ->
+                powerManager.setJammingBoost(
+                    this@BluetoothConnectionManager.isActive && assessment.level == JammingDetector.Level.LIKELY
+                )
             }
         }
         // Observe debug settings to enforce role state while active
@@ -258,6 +281,7 @@ class BluetoothConnectionManager(
         Log.i(TAG, "Stopping power-optimized Bluetooth services")
         
         isActive = false
+        JammingDetector.Shared.detector.reset()
         
         connectionScope.launch {
             Log.d(TAG, "Stopping client/server and power components...")

@@ -61,6 +61,17 @@ class PowerManager(private val context: Context) : LifecycleEventObserver {
     private var dutyCycleJob: Job? = null
     
     var delegate: PowerManagerDelegate? = null
+
+    @Volatile
+    private var jammingBoost = false
+
+    /** Raises the radio to full power while [JammingDetector] thinks jamming is likely. */
+    fun setJammingBoost(enabled: Boolean) {
+        if (jammingBoost == enabled) return
+        jammingBoost = enabled
+        Log.i(TAG, "Jamming boost ${if (enabled) "on" else "off"}")
+        updatePowerMode()
+    }
     
     // Battery monitoring
     private val batteryReceiver = object : BroadcastReceiver() {
@@ -274,11 +285,14 @@ class PowerManager(private val context: Context) : LifecycleEventObserver {
 
         // If app is in background (including when running as a foreground service),
         // cap the power mode to at least POWER_SAVER. Preserve ULTRA_LOW_POWER.
-        val newMode = if (isAppInBackground) {
+        val cappedMode = if (isAppInBackground) {
             if (baseMode == PowerMode.ULTRA_LOW_POWER) PowerMode.ULTRA_LOW_POWER else PowerMode.POWER_SAVER
         } else {
             baseMode
         }
+        // Survival mode while jamming is likely: continuous scanning and the strongest advertising
+        // give the best chance of getting through a weak jammer. Not on a critical battery.
+        val newMode = if (jammingBoost && batteryLevel > CRITICAL_BATTERY) PowerMode.PERFORMANCE else cappedMode
 
         if (newMode != currentMode) {
             val oldMode = currentMode

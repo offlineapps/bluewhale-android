@@ -164,6 +164,7 @@ class BluetoothGattServerManager(
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED -> {
                         Log.i(TAG, "Server: Device connected ${device.address}")
+                        JammingDetector.Shared.detector.onLinkUp()
                         
                         // Get best available RSSI (scan RSSI for server connections)
                         val rssi = connectionTracker.getBestRSSI(device.address) ?: Int.MIN_VALUE
@@ -184,6 +185,7 @@ class BluetoothGattServerManager(
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
                         Log.i(TAG, "Server: Device disconnected ${device.address}")
+                        JammingDetector.Shared.detector.onLinkLost(device.address, status)
                         connectionTracker.cleanupDeviceConnection(device.address)
                         // Notify delegate about device disconnection so higher layers can update direct flags
                         delegate?.onDeviceDisconnected(device)

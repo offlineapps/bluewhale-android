@@ -24,6 +24,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Stealth (listen only) mode in settings. The device stops advertising and announcing, and
   sends and relays nothing over Bluetooth, while still connecting to nearby peers to receive
   public messages. See `docs/stealth_mode.md`.
+- Jamming detection. Several Bluetooth links failing with radio timeouts at once, and a busy
+  mesh going silent while scanning, are reported in the chat as possible or likely jamming. Likely
+  jamming switches the radio to full power until it clears. See `docs/jamming_detection.md`.
 
 ### Fixed
 - A timed-out `/ai` question kept running on the model, so the next question waited behind it

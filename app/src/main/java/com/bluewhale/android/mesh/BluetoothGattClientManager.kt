@@ -249,6 +249,7 @@ class BluetoothGattClientManager(
             override fun onScanFailed(errorCode: Int) {
                 Log.e(TAG, "Scan failed: $errorCode")
                 isCurrentlyScanning = false
+                JammingDetector.Shared.detector.onScanning(false)
                 lastScanStopTime = System.currentTimeMillis()
                 
                 when (errorCode) {
@@ -277,6 +278,7 @@ class BluetoothGattClientManager(
             isCurrentlyScanning = true
             
             bleScanner.startScan(scanFilters, powerManager.getScanSettings(), scanCallback)
+            JammingDetector.Shared.detector.onScanning(true)
             Log.d(TAG, "BLE scan started successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Exception starting scan: ${e.message}")
@@ -303,6 +305,7 @@ class BluetoothGattClientManager(
             
             isCurrentlyScanning = false
             lastScanStopTime = System.currentTimeMillis()
+            JammingDetector.Shared.detector.onScanning(false)
         }
     }
     
@@ -329,6 +332,7 @@ class BluetoothGattClientManager(
         if (!hasOurService) {
             return
         }
+        JammingDetector.Shared.detector.onAdvertisementSeen(deviceAddress)
 
         // Rotating advertisement value, not a peer ID. Only good for spotting the same
         // device under two addresses within one rotation window.
@@ -426,6 +430,7 @@ class BluetoothGattClientManager(
                 Log.d(TAG, "Client: Connection state change - Device: $deviceAddress, Status: $status, NewState: $newState")
 
                 if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
+                    JammingDetector.Shared.detector.onLinkUp()
                     Log.i(TAG, "Client: Successfully connected to $deviceAddress. Requesting MTU...")
                     // Request a larger MTU. Must be done before any data transfer.
                     connectionScope.launch {
@@ -435,6 +440,7 @@ class BluetoothGattClientManager(
                     // Restart the RSSI loop so it leaves its idle backoff immediately
                     startRSSIMonitoring()
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    JammingDetector.Shared.detector.onLinkLost(deviceAddress, status)
                     if (status != BluetoothGatt.GATT_SUCCESS) {
                         Log.w(TAG, "Client: Disconnected from $deviceAddress with error status $status")
                         if (status == 147) {
