@@ -103,8 +103,10 @@ android {
         }
     }
     lint {
+        // Issues that existed when the gate was added are in the baseline; any new lint error
+        // fails the build. Regenerate after fixing old ones: ./gradlew updateLintBaseline
         baseline = file("lint-baseline.xml")
-        abortOnError = false
+        abortOnError = true
         checkReleaseBuilds = false
     }
 }
