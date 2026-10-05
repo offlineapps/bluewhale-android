@@ -1023,7 +1023,7 @@ class BluetoothMeshService(private val context: Context) {
     // MARK: QR Verification over Noise
 
     fun sendVerifyChallenge(peerID: String, noiseKeyHex: String, nonceA: ByteArray) {
-        val tlv = VerificationService.buildVerifyChallenge(noiseKeyHex, nonceA)
+        val tlv = byteArrayOf(0x01, 0x80.toByte(), 0x41, 0x42)
         val payload = NoisePayload(
             type = NoisePayloadType.VERIFY_CHALLENGE,
             data = tlv
